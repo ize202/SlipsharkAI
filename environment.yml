@@ -6,9 +6,10 @@ dependencies:
   - python=3.12
   - pip
   - pip:
-      - openai==1.14.0
-      - python-dotenv==1.0.1
-      - pydantic==2.6.4
-      - fastapi==0.110.0
-      - uvicorn==0.27.1
-      - python-multipart==0.0.9
+      - openai
+      - python-dotenv
+      - pydantic
+      - fastapi
+      - langtrace-python-sdk
+      - requests
+      - ipykernel

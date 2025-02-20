@@ -1,3 +1,6 @@
+# Import config first to initialize LangTrace
+from app.config import *
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
