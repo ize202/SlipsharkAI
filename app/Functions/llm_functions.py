@@ -2,6 +2,7 @@ from typing import Optional
 import os
 import logging
 from langtrace_python_sdk import langtrace
+from langtrace_python_sdk.utils.with_root_span import with_langtrace_root_span
 from opentelemetry import trace
 from openai import OpenAI
 from ..config import OPENAI_API_KEY, LANGTRACE_API_KEY
@@ -32,6 +33,7 @@ tracer = trace.get_tracer(__name__)
 client = OpenAI()  # It will automatically use OPENAI_API_KEY from environment
 model = "gpt-4-turbo-preview"  # Using the latest model for best performance
 
+@with_langtrace_root_span()
 def analyze_query(user_input: str) -> QueryAnalysis:
     """Initial LLM call to analyze the user's query and determine research path"""
     logger.info("Starting query analysis")
@@ -74,6 +76,7 @@ def analyze_query(user_input: str) -> QueryAnalysis:
             span.set_attribute("error", str(e))
         raise
 
+@with_langtrace_root_span()
 def quick_research(query: QueryAnalysis) -> QuickResearchResult:
     """Perform quick research using basic web search and simple analysis"""
     logger.info(f"Starting quick research for {query.sport_type}")
@@ -117,6 +120,7 @@ def quick_research(query: QueryAnalysis) -> QuickResearchResult:
             span.set_attribute("error", str(e))
         raise
 
+@with_langtrace_root_span()
 def deep_research(query: QueryAnalysis, data_points: list[DataPoint]) -> DeepResearchResult:
     """Perform comprehensive research using multiple data sources"""
     logger.info(f"Starting deep research for {query.sport_type}")
