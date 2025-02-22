@@ -4,4 +4,4 @@ python-dotenv
 openai>=1.0.0
 pydantic
 fastapi
-langtrace-python-sdk
+langfuse

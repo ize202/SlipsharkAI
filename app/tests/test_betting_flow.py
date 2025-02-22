@@ -1,25 +1,20 @@
 import logging
-from langtrace_python_sdk import langtrace
-from langtrace_python_sdk.utils.with_root_span import with_langtrace_root_span
-from ..config import LANGTRACE_API_KEY
-
-# Initialize LangTrace before importing OpenAI
-langtrace.init(api_key=LANGTRACE_API_KEY)
-
-from openai import OpenAI
+from langfuse.decorators import observe
+from langfuse import Langfuse
+import openai
+from ..config.langfuse_init import langfuse  # Use the initialized Langfuse instance
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@with_langtrace_root_span()
+@observe(name="test_llm_connection")
 def test_llm_connection():
-    """Test basic LLM connection with LangTrace observability"""
+    """Test basic LLM connection with Langfuse observability"""
     logger.info("Starting basic LLM connection test...")
     
     try:
-        client = OpenAI()
-        response = client.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
                 {"role": "user", "content": "Say hello!"}
