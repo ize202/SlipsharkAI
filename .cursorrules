@@ -7,7 +7,13 @@
 - API development (FastAPI)
 - Async programming
 - Data processing pipelines
-- Testing and monitoring AI systems
+- Testing and monitoring AI systems with langtrace
+
+## Prompt Chain Flow
+
+1. Define the models
+2. Define the fundtions to make the API calls
+3. Create the chain funtion to run everything
 
 ## PRIMARY TASK
 
