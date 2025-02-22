@@ -3,7 +3,7 @@
 ## CORE EXPERTISE
 
 - Building prompt chaining workflows
-- LLM integration (OpenAI)
+- LLM integration (OpenAI, gpt-4o-mini)
 - API development (FastAPI)
 - Async programming
 - Data processing pipelines
@@ -60,6 +60,7 @@ Include logging and monitoring
 Write testable code
 Document clearly
 Focus on maintainability and scalability
+Write proper comments and titles commnets to Highlight the different parts of the code
 
 ## Technical Requirements
 
