@@ -8,6 +8,8 @@ API development with FastAPI
 Asynchronous programming with asyncio  
 Data processing pipelines for real-time and batch operations  
 Testing and observability with Langfuse (the US cloud version)
+Setup langfuse traces and other observability tools with Langfuse as we build the workflow
+Use the languse docs to help you see if there any metrics, traces or features we should be using as we build the workflow
 
 ## Prompt Chain Flow
 

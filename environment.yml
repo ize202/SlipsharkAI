@@ -6,10 +6,10 @@ dependencies:
   - python=3.12
   - pip
   - pip:
-      - openai
+      - openai>=1.0.0
       - python-dotenv
       - pydantic
       - fastapi
-      - langtrace-python-sdk
+      - langfuse
       - requests
       - ipykernel
