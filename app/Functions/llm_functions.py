@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-model = "gpt-4-turbo-preview"  # Using the latest model for best performance
+model = "gpt-4o-mini"  
 
 async def analyze_query(user_input: str) -> QueryAnalysis:
     """Initial LLM call to analyze the user's query and determine research path"""
