@@ -215,22 +215,26 @@ class GoalserveNBAService:
             raise
     
     @observe(name="goalserve_get_player_stats")
-    async def get_player_stats(self, team_name: str) -> List[NBAPlayerStats]:
+    async def get_player_stats(self, team_id: str) -> List[NBAPlayerStats]:
         """Get current season statistics for all players on an NBA team"""
         try:
-            params = {
-                "sport": "basketball",
-                "league": "nba",
-                "key": self.api_key,
-                "team": team_name,
-                "players": "true"
-            }
+            # Use the team_stats endpoint with team ID
+            data = await self._make_request(f"{team_id}_stats")
             
-            data = await self._make_request("players", params)
+            players = []
+            for player in data.get("statistics", {}).get("players", []):
+                players.append(NBAPlayerStats(
+                    player_id=player.get("id", ""),
+                    name=player.get("name", ""),
+                    position=player.get("position", ""),
+                    status=player.get("status", "Active"),
+                    points_per_game=float(player.get("points_per_game", 0.0)),
+                    rebounds_per_game=float(player.get("rebounds_per_game", 0.0)),
+                    assists_per_game=float(player.get("assists_per_game", 0.0)),
+                    minutes_per_game=float(player.get("minutes_per_game", 0.0))
+                ))
             
-            # TODO: Parse the response and map to list of NBAPlayerStats models
-            # This will need to be adjusted based on actual Goalserve API response format
-            return [NBAPlayerStats(**player_data) for player_data in data["players"]]
+            return players
                 
         except Exception as e:
             logger.error(f"Error getting player stats: {str(e)}", exc_info=True)
