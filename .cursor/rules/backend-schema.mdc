@@ -1,0 +1,220 @@
+---
+description: Working with the backend and Supabase. This contains the backend schema and some other files relating the the backend
+globs: 
+---
+# Database Stuff
+
+## MCP Connection
+Supabase MCP connection is enabled so you can connect directly to supabase using the MCP tool. The schema in this table might not be updated so don't hesitate to use the MCP tool to get up to date info. The MCP tool is only connected to the Dev database not the prod db
+
+## Database Schema 
+
+Teams
+CREATE TABLE public.teams (
+    id uuid DEFAULT extensions.uuid_generate_v4() PRIMARY KEY,
+    external_id text UNIQUE,
+    name text NOT NULL,
+    abbreviation text NOT NULL,
+    sport text NOT NULL CHECK (sport IN ('NBA', 'NFL', 'MLB', 'NHL')),
+    logo_url text,
+    created_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT valid_abbreviation CHECK (char_length(abbreviation) >= 2)
+) TABLESPACE pg_default;
+
+Games
+CREATE TABLE public.games (
+    id uuid DEFAULT extensions.uuid_generate_v4() PRIMARY KEY,
+    external_id text UNIQUE,
+    home_team_id uuid NOT NULL REFERENCES teams(id),
+    away_team_id uuid NOT NULL REFERENCES teams(id),
+    sport text NOT NULL CHECK (sport IN ('NBA', 'NFL', 'MLB', 'NHL')),
+    league text NOT NULL,
+    home_score integer,
+    away_score integer,
+    status text NOT NULL CHECK (status IN ('upcoming', 'live', 'final', 'postponed', 'cancelled')),
+    start_time timestamp with time zone NOT NULL,
+    period text,
+    time_remaining text,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT valid_score CHECK (
+        (status = 'upcoming' AND home_score IS NULL AND away_score IS NULL) OR
+        (status IN ('live', 'final') AND home_score IS NOT NULL AND away_score IS NOT NULL) OR
+        (status IN ('postponed', 'cancelled'))
+    )
+) TABLESPACE pg_default;
+
+-- Indexes for Games and Teams
+CREATE INDEX idx_games_teams ON games(home_team_id, away_team_id);
+CREATE INDEX idx_games_status ON games(status);
+CREATE INDEX idx_games_start_time ON games(start_time);
+CREATE INDEX idx_games_sport_league ON games(sport, league);
+CREATE INDEX idx_teams_sport ON teams(sport);
+
+Users 
+CREATE TABLE public.users (
+  id uuid NOT NULL,
+  username text NULL,
+  avatar_url text NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_login timestamp with time zone NULL,
+  preferences jsonb NOT NULL DEFAULT '{}'::jsonb,
+  deleted_at timestamp with time zone NULL,
+  is_username_set boolean NULL DEFAULT false,
+  name text NULL DEFAULT 'NULL'::text,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_username_key UNIQUE (username),
+  CONSTRAINT users_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT username_length CHECK ((char_length(username) >= 3)),
+  CONSTRAINT valid_avatar_url CHECK (((avatar_url IS NULL) OR (avatar_url ~* '^https?://.*$'::text))),
+  CONSTRAINT valid_username CHECK ((username ~* '^[a-zA-Z0-9_]+$'::text))
+) TABLESPACE pg_default;
+
+Entries 
+CREATE TABLE public.entries (
+  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  type text NOT NULL,
+  platform text NOT NULL,
+  stake numeric NULL,
+  potential_payout numeric NULL,
+  actual_payout numeric NULL,
+  status text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  settled_at timestamp with time zone NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT entries_pkey PRIMARY KEY (id),
+  CONSTRAINT entries_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT entries_potential_payout_check CHECK ((potential_payout >= (0)::numeric)),
+  CONSTRAINT entries_stake_check CHECK ((stake >= (0)::numeric)),
+  CONSTRAINT entries_status_check CHECK ((status = ANY (ARRAY['active'::text, 'won'::text, 'lost'::text, 'void'::text, 'cash_out'::text]))),
+  CONSTRAINT entries_type_check CHECK ((type = ANY (ARRAY['bet'::text, 'fantasy'::text]))),
+  CONSTRAINT entries_valid_payout CHECK ((((status = 'won'::text) AND (actual_payout > (0)::numeric)) OR ((status = ANY (ARRAY['lost'::text, 'void'::text])) AND (actual_payout = (0)::numeric)) OR ((status = 'active'::text) AND (actual_payout IS NULL)) OR ((status = 'cash_out'::text) AND (actual_payout >= (0)::numeric)))),
+  CONSTRAINT entries_actual_payout_check CHECK ((actual_payout >= (0)::numeric)),
+  CONSTRAINT entries_valid_settlement CHECK ((((status = ANY (ARRAY['won'::text, 'lost'::text, 'void'::text, 'cash_out'::text])) AND (settled_at IS NOT NULL)) OR ((status = 'active'::text) AND (settled_at IS NULL)))),
+  CONSTRAINT entries_platform_check CHECK ((char_length(platform) >= 2))
+) TABLESPACE pg_default;
+
+Bet Details 
+CREATE TABLE public.bet_details (
+  entry_id uuid NOT NULL,
+  bet_type text NOT NULL,
+  sport text NOT NULL,
+  game_id text NULL,
+  odds numeric NULL,
+  boost_applied boolean NULL DEFAULT false,
+  boost_percentage numeric NULL,
+  cash_out_available boolean NULL DEFAULT false,
+  early_payout boolean NULL DEFAULT false,
+  void_reason text NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT bet_details_pkey PRIMARY KEY (entry_id),
+  CONSTRAINT bet_details_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+  CONSTRAINT bet_details_bet_type_check CHECK ((bet_type = ANY (ARRAY['straight'::text, 'parlay'::text, 'sgp'::text, 'teaser'::text]))),
+  CONSTRAINT bet_details_boost_percentage_check CHECK (((boost_percentage IS NULL) OR ((boost_percentage >= (0)::numeric) AND (boost_percentage <= (100)::numeric)))),
+  CONSTRAINT bet_details_sport_check CHECK ((char_length(sport) >= 2))
+) TABLESPACE pg_default;
+
+Fantasy Details
+CREATE TABLE public.fantasy_details (
+  entry_id uuid NOT NULL,
+  contest_type text NOT NULL,
+  contest_size integer NULL,
+  entry_count integer NULL,
+  placement integer NULL,
+  contest_id text NULL,
+  slate_start timestamp with time zone NULL,
+  slate_end timestamp with time zone NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT fantasy_details_pkey PRIMARY KEY (entry_id),
+  CONSTRAINT fantasy_details_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+  CONSTRAINT fantasy_details_entry_count_check CHECK ((entry_count > 0)),
+  CONSTRAINT fantasy_details_contest_size_check CHECK ((contest_size > 0)),
+  CONSTRAINT fantasy_details_contest_type_check CHECK ((contest_type = ANY (ARRAY['picks'::text, 'dfs'::text, 'survivor'::text, 'season_long'::text]))),
+  CONSTRAINT valid_placement CHECK (((placement IS NULL) OR ((placement > 0) AND (placement <= contest_size)))),
+  CONSTRAINT valid_slate_time CHECK ((((slate_start IS NULL) AND (slate_end IS NULL)) OR (slate_start < slate_end)))
+) TABLESPACE pg_default;
+
+Fantasy Picks
+CREATE TABLE public.fantasy_picks (
+  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+  entry_id uuid NOT NULL,
+  player_name text NOT NULL,
+  team text NOT NULL,
+  position text NOT NULL,
+  stat_type text NOT NULL,
+  target_line numeric NOT NULL,
+  actual_value numeric NULL,
+  pick_type text NOT NULL,
+  result text NULL DEFAULT 'pending'::text,
+  game_start timestamp with time zone NOT NULL,
+  settled_at timestamp with time zone NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT fantasy_picks_pkey PRIMARY KEY (id),
+  CONSTRAINT fantasy_picks_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+  CONSTRAINT fantasy_picks_pick_type_check CHECK ((pick_type = ANY (ARRAY['over'::text, 'under'::text]))),
+  CONSTRAINT fantasy_picks_result_check CHECK ((result = ANY (ARRAY['pending'::text, 'won'::text, 'lost'::text, 'void'::text]))),
+  CONSTRAINT valid_settlement CHECK ((((result = ANY (ARRAY['won'::text, 'lost'::text, 'void'::text])) AND (settled_at IS NOT NULL) AND (actual_value IS NOT NULL)) OR ((result = 'pending'::text) AND (settled_at IS NULL))))
+) TABLESPACE pg_default;
+
+Selections
+CREATE TABLE public.selections (
+  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+  entry_id uuid NOT NULL,
+  selection_type text NOT NULL,
+  market text NOT NULL,
+  team_name text NULL,
+  player_name text NULL,
+  proposition text NULL,
+  line numeric NULL,
+  odds numeric NOT NULL,
+  result text NULL DEFAULT 'pending'::text,
+  settled_at timestamp with time zone NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT selections_pkey PRIMARY KEY (id),
+  CONSTRAINT selections_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+  CONSTRAINT selections_result_check CHECK ((result = ANY (ARRAY['pending'::text, 'won'::text, 'lost'::text, 'void'::text]))),
+  CONSTRAINT selections_selection_type_check CHECK ((selection_type = ANY (ARRAY['team'::text, 'player_prop'::text, 'game_prop'::text]))),
+  CONSTRAINT valid_selection CHECK (
+    CASE
+      WHEN (selection_type = 'team'::text) THEN (team_name IS NOT NULL)
+      WHEN (selection_type = 'player_prop'::text) THEN (player_name IS NOT NULL)
+      WHEN (selection_type = 'game_prop'::text) THEN (proposition IS NOT NULL)
+      ELSE false
+    END
+  ),
+  CONSTRAINT valid_settlement CHECK ((((result = ANY (ARRAY['won'::text, 'lost'::text, 'void'::text])) AND (settled_at IS NOT NULL)) OR ((result = 'pending'::text) AND (settled_at IS NULL))))
+) TABLESPACE pg_default;
+
+User Stats
+CREATE TABLE public.user_stats (
+  user_id uuid NOT NULL,
+  entry_type text NOT NULL,
+  sport text NOT NULL,
+  period text NOT NULL,
+  total_entries integer NULL DEFAULT 0,
+  won_entries integer NULL DEFAULT 0,
+  total_stake numeric NULL DEFAULT 0,
+  total_payout numeric NULL DEFAULT 0,
+  roi numeric NULL,
+  updated_at timestamp with time zone NULL DEFAULT now(),
+  CONSTRAINT user_stats_pkey PRIMARY KEY (user_id, entry_type, sport, period),
+  CONSTRAINT user_stats_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT user_stats_total_entries_check CHECK ((total_entries >= 0)),
+  CONSTRAINT user_stats_total_payout_check CHECK ((total_payout >= (0)::numeric)),
+  CONSTRAINT user_stats_total_stake_check CHECK ((total_stake >= (0)::numeric)),
+  CONSTRAINT user_stats_won_entries_check CHECK ((won_entries >= 0)),
+  CONSTRAINT user_stats_entry_type_check CHECK ((entry_type = ANY (ARRAY['bet'::text, 'fantasy'::text]))),
+  CONSTRAINT valid_entries CHECK ((won_entries <= total_entries)),
+  CONSTRAINT user_stats_period_check CHECK ((period = ANY (ARRAY['daily'::text, 'weekly'::text, 'monthly'::text, 'all-time'::text])))
+) TABLESPACE pg_default;
+
+## SupabaseKit
+Most of the backend stuff is handeled in the SupabaseKit folder/group
+@SupabaseBackend.swift
+
+## Database developement setup
+We use two remote databases. One for prodution (Called Slips) and one for developement (Called SlipsDEV). We dont use any local databases instances. This is Important to remember. We have a ifDebug in the supabase backend swift file that we use to control the access to the remote prod and dev Databases
+
+

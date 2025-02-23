@@ -63,6 +63,13 @@ Formatted output (structured JSON or Markdown for UI).
 - Provide clear documentation (docstrings, README, inline comments).  
 - Prioritize maintainability (modular functions) and scalability (async, caching).  
 - Use descriptive comments with section headers (e.g., # Query Analysis).
+- Add proper comments to everything (e.g the workflow should have comments like
+# First LLM call: Extract basic info
+# Gate check: Verify if it's a calendar event with sufficient confidence
+# Second LLM call: Extract more complex info
+# Third LLM call: Extract even more complex info
+# Fourth LLM call: Clean up the response and make sure it's in the correct format
+)
 
 ## Technical Requirements
 
