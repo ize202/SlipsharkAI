@@ -13,3 +13,4 @@ dependencies:
       - langfuse
       - requests
       - ipykernel
+      - supabase

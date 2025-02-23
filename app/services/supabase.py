@@ -1,10 +1,11 @@
 from typing import Optional, Dict, Any, List
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
 from supabase import create_client, Client
+from app.models.betting_models import BetHistory, UserStats
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -136,4 +137,31 @@ class SupabaseService:
             
         except Exception as e:
             logger.error(f"Error getting similar bets: {str(e)}", exc_info=True)
-            raise 
+            raise
+
+    async def get_bet_history(self, user_id: str, days_back: int):
+        """Retrieve bet history for a user within a date range."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+        # Simulate a Supabase query chain
+        result = self.client.table("bet_history").select().eq("user_id", user_id).gte("created_at", cutoff).execute()
+        # Parse each record using the BetHistory model
+        return [BetHistory.from_dict(item, user_id) for item in result.data]
+
+    async def get_user_stats(self, user_id: str, sport: str):
+        """Retrieve user stats for a given sport."""
+        result = self.client.table("user_stats").select().eq("user_id", user_id).eq("sport", sport).execute()
+        return [UserStats(**data) for data in result.data]
+
+    async def get_similar_bets(self, sport: str, bet_type: str, days_back: int, min_odds: float, max_odds: float):
+        """Retrieve similar bets based on criteria."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+        result = self.client.table("bet_history").select().eq("sport", sport).eq("bet_type", bet_type).gte("created_at", cutoff).execute()
+        # Filter records based on odds
+        similar = [item for item in result.data if min_odds <= float(item.get("odds", 0)) <= max_odds]
+        return [BetHistory.from_dict(item, item.get("user_id", "")) for item in similar]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass 

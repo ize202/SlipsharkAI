@@ -6,9 +6,17 @@ import gzip
 from datetime import datetime, timedelta, UTC
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
+import json
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Added helper function to parse ISO date strings (handles trailing 'Z')
+def parse_date(date_str: str) -> datetime:
+    """Parse ISO formatted date string, handling trailing 'Z' if present."""
+    if date_str and date_str.endswith('Z'):
+        date_str = date_str[:-1]
+    return datetime.fromisoformat(date_str) if date_str else None
 
 class NBATeamStats(BaseModel):
     """NBA team statistics from Goalserve"""
@@ -41,19 +49,17 @@ class NBAPlayerStats(BaseModel):
 class NBAGameOdds(BaseModel):
     """NBA game odds from Goalserve"""
     game_id: str
-    start_time: datetime
     home_team: str
     away_team: str
+    home_team_odds: float
+    away_team_odds: float
     spread: float
     total: float
-    home_moneyline: int
-    away_moneyline: int
-    last_updated: datetime
 
 class NBASchedule(BaseModel):
     """NBA game schedule from Goalserve"""
     game_id: str
-    start_time: datetime
+    game_date: datetime
     home_team: str
     away_team: str
     venue: str
@@ -72,32 +78,29 @@ class NBAHeadToHead(BaseModel):
 
 class NBAStandings(BaseModel):
     """NBA standings from Goalserve"""
-    conference: str
-    rank: int
     team_id: str
     team_name: str
+    conference: str = ""
     wins: int
     losses: int
     win_percentage: float
-    games_back: float
-    last_ten: str
-    streak: str
-    points_for: float
-    points_against: float
+    rank: int = 0
+    games_back: float = 0.0
+    last_ten: str = "0-0"
+    streak: str = ""
+    points_for: float = 0.0
+    points_against: float = 0.0
 
 class NBALiveScore(BaseModel):
     """NBA live score from Goalserve"""
     game_id: str
     status: str  # pregame, live, final
-    current_period: Optional[str] = None
+    period: Optional[str] = None
     time_remaining: Optional[str] = None
     home_team: str
     away_team: str
-    home_score: int
-    away_score: int
-    last_play: Optional[str] = None
-    scoring_leaders: Optional[Dict[str, Any]] = None
-    updated_at: datetime
+    home_team_score: int
+    away_team_score: int
 
 class GoalserveNBAService:
     """Service for interacting with Goalserve NBA API"""
@@ -108,7 +111,7 @@ class GoalserveNBAService:
         if not self.api_key:
             raise ValueError("GOALSERVE_API_KEY environment variable is not set")
         
-        self.base_url = "http://www.goalserve.com/getfeed"
+        self.base_url = "https://www.goalserve.com/getfeed"
         self.api_key_path = self.api_key  # The API key is included in the URL path
         
         # Initialize async client with GZIP support
@@ -127,217 +130,141 @@ class GoalserveNBAService:
         """Build the full URL for a Goalserve API endpoint"""
         return f"{self.base_url}/{self.api_key_path}/bsktbl/{endpoint}"
     
+    @observe(name="goalserve_make_request")
     async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Make a request to the Goalserve API with proper error handling and GZIP support"""
-        if params is None:
-            params = {}
-        
-        # Always request JSON output
-        params["json"] = "1"
-        
+        """Make a request to the Goalserve API"""
         try:
             url = self._build_url(endpoint)
+            params = params or {}
+            params["key"] = self.api_key
+
             async with self.client as client:
                 response = await client.get(url, params=params)
-                response.raise_for_status()
-                
-                # Handle GZIP compression if present
+                await response.raise_for_status()
+
                 if response.headers.get("content-encoding") == "gzip":
-                    decompressed_data = gzip.decompress(response.content)
-                    return httpx.loads(decompressed_data)
+                    decompressed = gzip.decompress(response.content)
+                    return json.loads(decompressed)
                 
-                return response.json()
-                
-        except httpx.RequestError as e:
-            logger.error(f"Request error for endpoint {endpoint}: {str(e)}", exc_info=True)
-            raise
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code} for endpoint {endpoint}: {str(e)}", exc_info=True)
-            raise
+                return await response.json()
+
         except Exception as e:
-            logger.error(f"Unexpected error for endpoint {endpoint}: {str(e)}", exc_info=True)
+            logger.error(f"Error in API request: {str(e)}")
             raise
     
     @observe(name="goalserve_get_upcoming_games")
     async def get_upcoming_games(self, team_name: str) -> List[NBASchedule]:
         """Get upcoming games schedule for an NBA team"""
         try:
-            # Use the nba-shedule endpoint
-            data = await self._make_request("nba-shedule")
-            
-            # Filter games for the requested team
+            data = await self._make_request("nba-schedule")
             games = []
-            for game in data.get("games", []):
-                if team_name.lower() in [game["hometeam"].lower(), game["awayteam"].lower()]:
-                    schedule = NBASchedule(
-                        game_id=game["id"],
-                        start_time=datetime.strptime(f"{game['date']} {game['time']}", "%Y-%m-%d %H:%M"),
-                        home_team=game["hometeam"],
-                        away_team=game["awayteam"],
-                        venue=game.get("venue", ""),
-                        status=game["status"],
-                        score_home=game.get("score_home"),
-                        score_away=game.get("score_away")
-                    )
-                    games.append(schedule)
-            
+            for match in data.get("matches", []):
+                home_team = match.get("home_team", {}).get("name")
+                away_team = match.get("away_team", {}).get("name")
+                if team_name in [home_team, away_team]:
+                    games.append(NBASchedule(
+                        game_id=match.get("id"),
+                        game_date=parse_date(match.get("date")),
+                        home_team=home_team,
+                        away_team=away_team,
+                        venue=match.get("venue_name"),
+                        status=match.get("status", "scheduled"),
+                        score_home=match.get("home_team", {}).get("totalscore"),
+                        score_away=match.get("away_team", {}).get("totalscore")
+                    ))
             return games
                 
         except Exception as e:
-            logger.error(f"Error getting upcoming games: {str(e)}", exc_info=True)
+            logger.error(f"Error getting upcoming games: {str(e)}")
             raise
     
     @observe(name="goalserve_get_team_stats")
     async def get_team_stats(self, team_id: str) -> NBATeamStats:
         """Get current season statistics for an NBA team"""
         try:
-            # Use the team_stats endpoint with team ID
-            data = await self._make_request(f"{team_id}_stats")
-            
-            stats = data.get("statistics", {}).get("team", {})
+            data = await self._make_request(f"{team_id}_team_stats")
+            team_data = data.get("statistic", {}).get("team", {})
+            stats = team_data.get("stats", {})
             return NBATeamStats(
                 team_id=team_id,
-                name=stats.get("name", ""),
-                wins=int(stats.get("wins", 0)),
-                losses=int(stats.get("losses", 0)),
-                win_percentage=float(stats.get("win_percentage", 0.0)),
-                points_per_game=float(stats.get("points_per_game", 0.0)),
-                points_allowed=float(stats.get("points_allowed", 0.0)),
+                name=team_data.get("name", ""),
+                wins=int(stats.get("wins", "0")),
+                losses=int(stats.get("losses", "0")),
+                win_percentage=float(stats.get("win_percentage", "0.0")),
+                points_per_game=float(stats.get("points_per_game", "0.0")),
+                points_allowed=float(stats.get("points_allowed", "0.0")),
                 last_ten=stats.get("last_ten", "0-0"),
                 streak=stats.get("streak", ""),
                 home_record=stats.get("home_record", "0-0"),
                 away_record=stats.get("away_record", "0-0"),
-                conference_rank=int(stats.get("conference_rank", 0))
+                conference_rank=int(stats.get("conference_rank", "0"))
             )
                 
         except Exception as e:
-            logger.error(f"Error getting team stats: {str(e)}", exc_info=True)
+            logger.error(f"Error getting team stats: {str(e)}")
             raise
     
     @observe(name="goalserve_get_player_stats")
     async def get_player_stats(self, team_id: str) -> List[NBAPlayerStats]:
         """Get current season statistics for all players on an NBA team"""
         try:
-            # Use the team_stats endpoint with team ID
-            data = await self._make_request(f"{team_id}_stats")
-            
+            data = await self._make_request(f"{team_id}_team_stats")
             players = []
-            for player in data.get("statistics", {}).get("players", []):
+            for player in data.get("statistic", {}).get("team", {}).get("players", []):
                 players.append(NBAPlayerStats(
                     player_id=player.get("id", ""),
                     name=player.get("name", ""),
                     position=player.get("position", ""),
                     status=player.get("status", "Active"),
-                    points_per_game=float(player.get("points_per_game", 0.0)),
-                    rebounds_per_game=float(player.get("rebounds_per_game", 0.0)),
-                    assists_per_game=float(player.get("assists_per_game", 0.0)),
-                    minutes_per_game=float(player.get("minutes_per_game", 0.0))
+                    points_per_game=float(player.get("points_per_game", "0.0")),
+                    rebounds_per_game=float(player.get("rebounds_per_game", "0.0")),
+                    assists_per_game=float(player.get("assists_per_game", "0.0")),
+                    minutes_per_game=float(player.get("minutes_per_game", "0.0"))
                 ))
-            
             return players
                 
         except Exception as e:
-            logger.error(f"Error getting player stats: {str(e)}", exc_info=True)
+            logger.error(f"Error getting player stats: {str(e)}")
             raise
     
     @observe(name="goalserve_get_game_odds")
-    async def get_game_odds(self, team_name: str) -> List[NBAGameOdds]:
-        """Get upcoming game odds for an NBA team"""
-        try:
-            params = {
-                "sport": "basketball",
-                "league": "nba",
-                "key": self.api_key,
-                "team": team_name,
-                "odds": "true"
-            }
-            
-            data = await self._make_request("odds", params)
-            
-            # TODO: Parse the response and map to list of NBAGameOdds models
-            # This will need to be adjusted based on actual Goalserve API response format
-            return [NBAGameOdds(**game_data) for game_data in data["games"]]
-                
-        except Exception as e:
-            logger.error(f"Error getting game odds: {str(e)}", exc_info=True)
-            raise
-    
-    @observe(name="goalserve_get_injuries")
-    async def get_injuries(self, team_id: str) -> List[NBAPlayerStats]:
-        """Get current injuries for an NBA team"""
-        try:
-            # Use the injuries endpoint with team ID
-            data = await self._make_request(f"{team_id}_injuries")
-            
-            injuries = []
-            for player in data.get("team", {}).get("report", []):
-                injuries.append(NBAPlayerStats(
-                    player_id=player.get("id", ""),
-                    name=player.get("player_name", ""),
-                    position=player.get("position", ""),
-                    status="Injured",
-                    points_per_game=0.0,  # Injury report doesn't include stats
-                    rebounds_per_game=0.0,
-                    assists_per_game=0.0,
-                    minutes_per_game=0.0,
-                    injury_status=player.get("status", ""),
-                    injury_details=player.get("description", "")
-                ))
-            
-            return injuries
-                
-        except Exception as e:
-            logger.error(f"Error getting injuries: {str(e)}", exc_info=True)
-            raise
-    
-    @observe(name="goalserve_get_odds_comparison")
     async def get_odds_comparison(self, date1: Optional[str] = None, date2: Optional[str] = None) -> List[NBAGameOdds]:
         """Get odds comparison from various bookmakers for a date range"""
         try:
-            # Build the endpoint with showodds parameter
-            endpoint = "nba-shedule"
+            endpoint = "nba-schedule"
             params = {"showodds": "1"}
-            
-            # Add date range if provided
             if date1:
                 params["date1"] = date1
             if date2:
                 params["date2"] = date2
-            
+
             data = await self._make_request(endpoint, params)
-            
+
             odds_list = []
             for match in data.get("matches", []):
-                if "odds" not in match:
-                    continue
-                    
-                odds = match["odds"]
-                game_odds = NBAGameOdds(
-                    game_id=match["contestID"],
-                    start_time=datetime.strptime(f"{match['formatted_date']} {match['time']}", "%Y-%m-%d %H:%M"),
-                    home_team=match["hometeam"],
-                    away_team=match["awayteam"],
-                    spread=float(odds.get("spread", {}).get("home", 0.0)),
-                    total=float(odds.get("total", {}).get("total", 0.0)),
-                    home_moneyline=int(odds.get("moneyline", {}).get("home", 0)),
-                    away_moneyline=int(odds.get("moneyline", {}).get("away", 0)),
-                    last_updated=datetime.now(UTC)
-                )
-                odds_list.append(game_odds)
-            
+                odds = match.get("odds", {})
+                home_team = match.get("home_team", {}).get("name")
+                away_team = match.get("away_team", {}).get("name")
+                odds_list.append(NBAGameOdds(
+                    game_id=match.get("id"),
+                    home_team=home_team,
+                    away_team=away_team,
+                    home_team_odds=float(odds.get("home_team_odds", "0.0")),
+                    away_team_odds=float(odds.get("away_team_odds", "0.0")),
+                    spread=float(odds.get("spread", "0.0")),
+                    total=float(odds.get("total", "0.0"))
+                ))
             return odds_list
                 
         except Exception as e:
-            logger.error(f"Error getting odds comparison: {str(e)}", exc_info=True)
+            logger.error(f"Error getting odds comparison: {str(e)}")
             raise
     
     @observe(name="goalserve_get_head_to_head")
     async def get_head_to_head(self, team1_id: str, team2_id: str) -> NBAHeadToHead:
         """Get head-to-head comparison between two teams"""
         try:
-            # Use the h2h endpoint with team IDs
             data = await self._make_request(f"h2h_{team1_id}-{team2_id}")
-            
             h2h_data = data.get("h2h", {})
             return NBAHeadToHead(
                 total_games=int(h2h_data.get("total_games", 0)),
@@ -349,7 +276,7 @@ class GoalserveNBAService:
             )
                 
         except Exception as e:
-            logger.error(f"Error getting head to head comparison: {str(e)}", exc_info=True)
+            logger.error(f"Error getting head to head comparison: {str(e)}")
             raise
     
     @observe(name="goalserve_get_standings")
@@ -357,60 +284,46 @@ class GoalserveNBAService:
         """Get current NBA standings"""
         try:
             data = await self._make_request("nba-standings")
-            
             standings_list = []
-            for conference in data.get("standings", {}).values():
-                for team in conference:
-                    standings = NBAStandings(
-                        conference=team.get("conference", ""),
-                        rank=int(team.get("position", 0)),
-                        team_id=team.get("id", ""),
-                        team_name=team.get("name", ""),
-                        wins=int(team.get("won", 0)),
-                        losses=int(team.get("lost", 0)),
-                        win_percentage=float(team.get("percentage", 0.0)),
-                        games_back=float(team.get("games_back", 0.0)),
-                        last_ten=team.get("last_ten", "0-0"),
-                        streak=team.get("streak", ""),
-                        points_for=float(team.get("points_for", 0.0)),
-                        points_against=float(team.get("points_against", 0.0))
-                    )
-                    standings_list.append(standings)
-            
+            # Iterate over each conference key
+            for conf, teams in data.get("standings", {}).items():
+                for team in teams:
+                    standings_list.append(NBAStandings(
+                        team_id=team.get("team_id"),
+                        team_name=team.get("name"),
+                        conference=conf,
+                        wins=int(team.get("wins", 0)),
+                        losses=int(team.get("losses", 0)),
+                        win_percentage=float(team.get("win_percentage", 0.0)),
+                        rank=int(team.get("conference_rank", 0))
+                    ))
             return standings_list
                 
         except Exception as e:
-            logger.error(f"Error getting standings: {str(e)}", exc_info=True)
+            logger.error(f"Error getting standings: {str(e)}")
             raise
-
+    
     @observe(name="goalserve_get_live_scores")
     async def get_live_scores(self) -> List[NBALiveScore]:
         """Get live NBA game scores"""
         try:
             data = await self._make_request("nba-scores")
-            
             scores = []
             for match in data.get("matches", []):
-                score = NBALiveScore(
-                    game_id=match.get("id", ""),
-                    status=match.get("status", ""),
-                    current_period=match.get("period", ""),
-                    time_remaining=match.get("timer", ""),
-                    home_team=match["hometeam"].get("name", ""),
-                    away_team=match["awayteam"].get("name", ""),
-                    home_score=int(match["hometeam"].get("score", 0)),
-                    away_score=int(match["awayteam"].get("score", 0)),
-                    last_play=match.get("last_play", ""),
-                    scoring_leaders={
-                        "home": match["hometeam"].get("scoring_leader", {}),
-                        "away": match["awayteam"].get("scoring_leader", {})
-                    },
-                    updated_at=datetime.now(UTC)
-                )
-                scores.append(score)
-            
+                home_team = match.get("home_team", {})
+                away_team = match.get("away_team", {})
+                scores.append(NBALiveScore(
+                    game_id=match.get("id"),
+                    status=match.get("status", "live"),
+                    period=match.get("period"),
+                    time_remaining=match.get("time_remaining"),
+                    home_team=home_team.get("name"),
+                    away_team=away_team.get("name"),
+                    home_team_score=int(home_team.get("totalscore", "0")),
+                    away_team_score=int(away_team.get("totalscore", "0"))
+                ))
             return scores
                 
         except Exception as e:
-            logger.error(f"Error getting live scores: {str(e)}", exc_info=True)
+            logger.error(f"Error getting live scores: {str(e)}")
             raise 

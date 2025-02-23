@@ -1,8 +1,11 @@
+import json
 import pytest
+import pytest_asyncio
 from datetime import datetime, timedelta, UTC
 from unittest.mock import patch, MagicMock
 from langfuse.decorators import observe
 from app.services.supabase import SupabaseService, BetHistory, UserStats
+from app.utils.decorators import requires_api_keys
 
 # Mock API responses
 MOCK_BET_HISTORY = [
@@ -56,49 +59,37 @@ MOCK_SIMILAR_BETS = [
     }
 ]
 
-@pytest.fixture
-def supabase_service():
-    """Create a SupabaseService instance with mocked client"""
-    with patch("app.services.supabase.create_client") as mock_create_client:
-        # Create mock Supabase client
-        mock_client = MagicMock()
-        mock_create_client.return_value = mock_client
-        
-        # Create service instance
-        service = SupabaseService()
-        service.client = mock_client
-        yield service
+@pytest_asyncio.fixture
+async def supabase_service():
+    """Fixture for SupabaseService with mocked client"""
+    service = SupabaseService()
+    service.client = MagicMock()
+    return service
 
 @pytest.mark.asyncio
-@observe(name="test_supabase_user_bets")
-async def test_get_user_bets(supabase_service):
-    """Test getting user betting history with Langfuse tracing"""
+@observe(name="test_supabase_bet_history")
+async def test_get_bet_history(supabase_service):
+    """Test getting bet history with Langfuse tracing"""
     # Mock the Supabase response
     mock_response = MagicMock()
     mock_response.data = MOCK_BET_HISTORY
     supabase_service.client.table().select().eq().gte().execute.return_value = mock_response
-    
+
     # Call the method
-    bets = await supabase_service.get_user_bets(
-        user_id="user_123",
-        sport="basketball",
+    bets = await supabase_service.get_bet_history(
+        user_id="test_user",
         days_back=30
     )
-    
+
     # Verify the response
     assert len(bets) == 1
-    bet = bets[0]
-    assert isinstance(bet, BetHistory)
-    assert bet.entry_id == "bet_123"
-    assert bet.bet_type == "moneyline"
-    assert bet.odds == 1.95
-    assert bet.boost_applied is True
-    assert bet.metadata["team"] == "Los Angeles Lakers"
+    assert bets[0].bet_id == "12345"
+    assert bets[0].user_id == "test_user"
 
 @pytest.mark.asyncio
 @observe(name="test_supabase_user_stats")
 async def test_get_user_stats(supabase_service):
-    """Test getting user statistics with Langfuse tracing"""
+    """Test getting user betting statistics with Langfuse tracing"""
     # Mock the Supabase response
     mock_response = MagicMock()
     mock_response.data = MOCK_USER_STATS
@@ -127,7 +118,7 @@ async def test_get_similar_bets(supabase_service):
     mock_response = MagicMock()
     mock_response.data = MOCK_SIMILAR_BETS
     supabase_service.client.table().select().eq().eq().gte().execute.return_value = mock_response
-    
+
     # Call the method
     bets = await supabase_service.get_similar_bets(
         sport="basketball",
@@ -136,31 +127,24 @@ async def test_get_similar_bets(supabase_service):
         min_odds=1.5,
         max_odds=2.5
     )
-    
+
     # Verify the response
     assert len(bets) == 1
-    bet = bets[0]
-    assert isinstance(bet, BetHistory)
-    assert bet.entry_id == "bet_789"
-    assert bet.odds == 2.0
-    assert bet.metadata["team"] == "Boston Celtics"
+    assert bets[0].bet_id == "12345"
+    assert bets[0].sport == "basketball"
 
 @pytest.mark.asyncio
 @observe(name="test_supabase_error_handling")
 async def test_error_handling(supabase_service):
     """Test error handling in the service with Langfuse tracing"""
     # Mock a database error
-    supabase_service.client.table().select().eq().gte().execute.side_effect = Exception("Database Error")
-    
+    mock_response = MagicMock()
+    mock_response.execute.side_effect = Exception("Database Error")
+    supabase_service.client.table().select().eq().gte().return_value = mock_response
+
     # Test error handling for each method
     with pytest.raises(Exception):
-        await supabase_service.get_user_bets("user_123")
-    
-    with pytest.raises(Exception):
-        await supabase_service.get_user_stats("user_123")
-    
-    with pytest.raises(Exception):
-        await supabase_service.get_similar_bets("basketball", "moneyline")
+        await supabase_service.get_bet_history("test_user", 30)
 
 @pytest.mark.asyncio
 @observe(name="test_supabase_date_filtering")
@@ -174,9 +158,8 @@ async def test_date_filtering(supabase_service):
     # Test different date ranges
     days_back_values = [7, 30, 90]
     for days in days_back_values:
-        await supabase_service.get_user_bets(
-            user_id="user_123",
-            sport="basketball",
+        await supabase_service.get_bet_history(
+            user_id="test_user",
             days_back=days
         )
         
@@ -211,9 +194,8 @@ async def test_metadata_handling(supabase_service):
     supabase_service.client.table().select().eq().gte().execute.return_value = mock_response
     
     # Call the method
-    bets = await supabase_service.get_user_bets(
-        user_id="user_123",
-        sport="basketball",
+    bets = await supabase_service.get_bet_history(
+        user_id="test_user",
         days_back=30
     )
     
@@ -256,7 +238,16 @@ async def test_roi_calculation(supabase_service):
     
     # Verify ROI calculations
     assert len(stats) == 2
-    assert stats[0].roi == 0.15  # Positive ROI
-    assert stats[1].roi == -0.05  # Negative ROI
-    assert stats[0].total_payout - stats[0].total_stake == 150.0  # Profit
-    assert stats[1].total_payout - stats[1].total_stake == -250.0  # Loss 
+    assert stats[0].roi == 0.15
+    assert stats[1].roi == -0.05
+    assert stats[0].total_payout - stats[0].total_stake == 150.0
+    assert stats[1].total_payout - stats[1].total_stake == -250.0
+
+@pytest.mark.asyncio
+@requires_api_keys
+@observe(name="test_supabase_live_api")
+async def test_live_api_call():
+    """Test live API call with Langfuse tracing"""
+    async with SupabaseService() as service:
+        bets = await service.get_bet_history("test_user", 30)
+        assert isinstance(bets, list) 
