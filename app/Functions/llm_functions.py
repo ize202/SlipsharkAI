@@ -1,5 +1,6 @@
 from typing import Optional, List
 import logging
+from datetime import datetime, UTC
 from langfuse.decorators import observe
 from langfuse import Langfuse
 import openai
@@ -88,8 +89,8 @@ async def quick_research(query: QueryAnalysis) -> QuickResearchResult:
                 confidence_score=calculate_confidence_score(result),
                 deep_research_recommended=should_recommend_deep_research(result),
                 citations=citations,
-                related_questions=result.related_questions,
-                last_updated=datetime.utcnow().isoformat()
+                related_questions=result.related_questions or [],  # Convert None to empty list
+                last_updated=datetime.now(UTC).isoformat()  # Use timezone-aware UTC
             )
             
     except Exception as e:
