@@ -1,11 +1,14 @@
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import logging
 from datetime import datetime, UTC
+import asyncio
 from langfuse.decorators import observe
 from langfuse import Langfuse
 import openai
 from ..config.langfuse_init import langfuse  # Use the initialized Langfuse instance
 from ..services.perplexity import PerplexityService, PerplexityResponse
+from ..services.goalserve import GoalserveNBAService
+from ..services.supabase import SupabaseService
 
 from ..models.betting_models import (
     QueryAnalysis,
@@ -13,7 +16,9 @@ from ..models.betting_models import (
     DeepResearchResult,
     DataPoint,
     SportType,
-    Citation
+    Citation,
+    BettingInsight,
+    RiskFactor
 )
 
 # Set up logging
@@ -152,30 +157,131 @@ def should_recommend_deep_research(result: PerplexityResponse) -> bool:
     return has_many_citations or has_related_questions or content_length > 200
 
 @observe(name="deep_research")
-def deep_research(query: QueryAnalysis, data_points: list[DataPoint]) -> DeepResearchResult:
-    """Perform comprehensive research using multiple data sources"""
+async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> DeepResearchResult:
+    """
+    Perform comprehensive research using multiple data sources
+    
+    Args:
+        query: Analyzed query containing sport type and other metadata
+        user_id: Optional user ID for personalized insights
+        
+    Returns:
+        DeepResearchResult with comprehensive analysis
+    """
     logger.info(f"Starting deep research for {query.sport_type}")
     
     try:
-        # Combine all data points into a coherent context
-        data_context = "\n".join([f"Source {dp.source}: {dp.content}" for dp in data_points])
+        # Extract team names from query for NBA research
+        # TODO: Implement more sophisticated team name extraction
+        team_name = extract_team_name(query.raw_query)
+        if not team_name:
+            raise ValueError("Could not extract team name from query")
         
+        # Initialize services
+        perplexity = PerplexityService()
+        goalserve = GoalserveNBAService()
+        supabase = SupabaseService()
+        
+        # Gather data from all sources in parallel
+        data_points = []
+        async with perplexity, goalserve:
+            # Define all the tasks we want to run in parallel
+            tasks = [
+                # Perplexity web search
+                perplexity.quick_research(
+                    query=f"Latest news, injuries, and betting trends for {team_name} NBA",
+                    search_recency="day"
+                ),
+                
+                # Goalserve NBA data
+                goalserve.get_team_stats(team_name),
+                goalserve.get_player_stats(team_name),
+                goalserve.get_game_odds(team_name),
+                goalserve.get_injuries(team_name),
+            ]
+            
+            # Add user history tasks if user_id is provided
+            if user_id:
+                tasks.extend([
+                    supabase.get_user_bets(user_id, sport="basketball", days_back=30),
+                    supabase.get_user_stats(user_id, sport="basketball"),
+                    supabase.get_similar_bets(
+                        sport="basketball",
+                        bet_type=query.bet_type if hasattr(query, 'bet_type') else "any",
+                        days_back=30
+                    )
+                ])
+            
+            # Execute all tasks in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results and handle any exceptions
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Error in task {i}: {str(result)}")
+                    continue
+                
+                # Add successful results to data points
+                if result:
+                    data_points.append(DataPoint(
+                        source=tasks[i].__qualname__,
+                        content=result.model_dump() if hasattr(result, 'model_dump') else str(result)
+                    ))
+        
+        # Combine all data into a coherent context for the LLM
+        context = create_analysis_context(query, data_points)
+        
+        # Use GPT-4o-mini to analyze the data
         messages = [
             {
                 "role": "system",
-                "content": "Perform detailed analysis of betting opportunity using all available data. Consider historical performance, current odds, and risk factors."
+                "content": """You are an expert sports betting analyst specializing in NBA betting analysis.
+                Analyze the provided data and generate comprehensive betting insights.
+                Focus on:
+                1. Current odds and line movements
+                2. Team performance metrics and trends
+                3. Player availability and impact
+                4. Historical betting patterns
+                5. Risk factors and confidence level
+                
+                Format your response as a structured JSON matching the DeepResearchResult model."""
             },
-            {"role": "user", "content": f"Query: {query.model_dump_json()}\nData:\n{data_context}"}
+            {"role": "user", "content": context}
         ]
         
-        completion = openai.chat.completions.create(
-            model=model,
-            messages=messages
+        completion = await openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.2  # Lower temperature for more focused analysis
         )
 
-        result = completion.choices[0].message.content
-        return DeepResearchResult.model_validate_json(result)
+        # Parse the LLM response into our result model
+        analysis = completion.choices[0].message.content
+        return DeepResearchResult.model_validate_json(analysis)
             
     except Exception as e:
         logger.error(f"Error in deep_research: {str(e)}", exc_info=True)
-        raise 
+        raise
+
+def extract_team_name(query: str) -> Optional[str]:
+    """Extract NBA team name from query string"""
+    # TODO: Implement more sophisticated team name extraction
+    # For now, just look for common team names
+    nba_teams = {
+        "Lakers", "Warriors", "Celtics", "Bulls", "Heat",
+        # Add more teams...
+    }
+    
+    words = query.split()
+    for word in words:
+        if word in nba_teams:
+            return word
+    return None
+
+def create_analysis_context(query: QueryAnalysis, data_points: List[DataPoint]) -> str:
+    """Create a structured context for the LLM to analyze"""
+    context = {
+        "query": query.model_dump(),
+        "data": {dp.source: dp.content for dp in data_points}
+    }
+    return str(context)  # Convert to string for LLM input 

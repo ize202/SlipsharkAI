@@ -141,8 +141,17 @@ class PerplexityService:
                 "sport_type": "one of: football, basketball, baseball, hockey, soccer, other",
                 "is_deep_research": "boolean indicating if deep research is needed",
                 "confidence_score": "float between 0 and 1",
-                "required_data_sources": ["list of required data sources"]
+                "required_data_sources": ["list of required data sources"],
+                "teams": {
+                    "primary": "main team being queried",
+                    "opponent": "opponent team if mentioned",
+                    "normalized_names": {
+                        "primary": "official NBA team name",
+                        "opponent": "official NBA team name"
+                    }
+                }
             }
+            For NBA teams, use official team names (e.g., 'Los Angeles Lakers' not just 'Lakers').
             Format as a plain JSON object, no markdown."""
             
             messages = [
