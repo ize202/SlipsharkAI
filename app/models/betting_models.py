@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -18,12 +18,22 @@ class QueryAnalysis(BaseModel):
     confidence_score: float = Field(description="Confidence score between 0 and 1")
     required_data_sources: List[str] = Field(description="List of required data sources")
 
+class Citation(BaseModel):
+    """Citation for a piece of information"""
+    url: str = Field(description="Source URL")
+    title: Optional[str] = Field(None, description="Title of the source")
+    snippet: Optional[str] = Field(None, description="Relevant excerpt from the source")
+    published_date: Optional[str] = Field(None, description="Publication date if available")
+
 class QuickResearchResult(BaseModel):
-    """Result from quick research flow"""
+    """Result from quick research flow using Perplexity AI"""
     summary: str = Field(description="Brief summary of findings")
     key_points: List[str] = Field(description="Key betting insights")
     confidence_score: float = Field(description="Confidence in the analysis")
     deep_research_recommended: bool = Field(description="Whether deep research is recommended")
+    citations: Optional[List[Citation]] = Field(default=[], description="Sources cited in the research")
+    related_questions: Optional[List[str]] = Field(default=[], description="Related betting questions to consider")
+    last_updated: str = Field(description="Timestamp of when this research was conducted")
 
 class DataPoint(BaseModel):
     """Individual data point from various sources"""

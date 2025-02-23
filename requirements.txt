@@ -5,3 +5,5 @@ openai>=1.0.0
 pydantic
 fastapi
 langfuse
+httpx>=0.25.0
+uvicorn
