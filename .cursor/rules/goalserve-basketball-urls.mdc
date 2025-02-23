@@ -13,51 +13,51 @@ Basketball:
 
 
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-shedule   - NBA schedule
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-shedule   - NBA schedule
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-scores   - NBA livescore
-
-
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-scores?date=dd.MM.yyyy    - past boxscores since 2010 by date ("dd.MM.yyyy")
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-playbyplay  - NBA live commentaries
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-scores?date=22.11.2010_pbp  - NBA play by play history by date ("dd.MM.yyyy")
-
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-standings  - NBA standings
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-scores   - NBA livescore
 
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/nba-shedule?date1=29.11.2022&date2=29.11.2022&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-scores?date=dd.MM.yyyy    - past boxscores since 2010 by date ("dd.MM.yyyy")
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-playbyplay  - NBA live commentaries
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-scores?date=22.11.2010_pbp  - NBA play by play history by date ("dd.MM.yyyy")
+
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-standings  - NBA standings
+
+
+http://www.goalserve.com/getfeed/---------/bsktbl/nba-shedule?date1=29.11.2022&date2=29.11.2022&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
 
 
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/1193_rosters   = team roster / team logo by team ID
+http://www.goalserve.com/getfeed/---------/bsktbl/1193_rosters   = team roster / team logo by team ID
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/1193_stats  - team player season stats by team ID
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/1193_injuries  - injuries reports by team ID
+http://www.goalserve.com/getfeed/---------/bsktbl/1193_stats  - team player season stats by team ID
+http://www.goalserve.com/getfeed/---------/bsktbl/1193_injuries  - injuries reports by team ID
 
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/usa?playerimage=2011  - NBA and NCAA player images
+http://www.goalserve.com/getfeed/---------/bsktbl/usa?playerimage=2011  - NBA and NCAA player images
 
 
 NCAA
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-all-scores   - all divisions NCAA livescore
+http://www.goalserve.com/getfeed/---------/bsktbl/ncaa-all-scores   - all divisions NCAA livescore
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-scores   - TOP 25 NCAA livescore
-https://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-scores?date=19.01.2022_all  - old games stats by date attribute ("dd.MM.yyyy")
+http://www.goalserve.com/getfeed/---------/bsktbl/ncaa-scores   - TOP 25 NCAA livescore
+https://www.goalserve.com/getfeed/---------/bsktbl/ncaa-scores?date=19.01.2022_all  - old games stats by date attribute ("dd.MM.yyyy")
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-playbyplay   - NCAA live commentaries
-https://www.goalserve.com/getfeed/432c3be1229741d8db2208d84eb5ef29/bsktbl/ncaa-scores?date=22.11.2010_pbp  - NCAA play by play history by date
+http://www.goalserve.com/getfeed/---------/bsktbl/ncaa-playbyplay   - NCAA live commentaries
+https://www.goalserve.com/getfeed/---------/bsktbl/ncaa-scores?date=22.11.2010_pbp  - NCAA play by play history by date
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-shedule   - NCAA schedule
+http://www.goalserve.com/getfeed/---------/bsktbl/ncaa-shedule   - NCAA schedule
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-shedule?date1=16.05.2022&date2=15.05.2022&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
-
-
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ncaa-standings   - NCAA standings
+http://www.goalserve.com/getfeed/---------/bsktbl/ncaa-shedule?date1=16.05.2022&date2=15.05.2022&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
 
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/1985_rosters      - NCAA team profile where 1985 is a team id
+http://www.goalserve.com/getfeed/---------/bsktbl/ncaa-standings   - NCAA standings
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/1985_stats
 
-http://www.goalserve.com/getfeed/208bc4278e4947e2eee308dd50f5b2ca/bsktbl/ap-rankings
+http://www.goalserve.com/getfeed/---------/bsktbl/1985_rosters      - NCAA team profile where 1985 is a team id
+
+http://www.goalserve.com/getfeed/---------/bsktbl/1985_stats
+
+http://www.goalserve.com/getfeed/---------/bsktbl/ap-rankings

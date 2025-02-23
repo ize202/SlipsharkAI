@@ -1,0 +1,133 @@
+---
+description: This is a summary of the docs for working with different Goalserve basketball feeds
+globs: 
+---
+# Goalserve doc summary for basketball feeds
+
+## Essential Goalserve Data Feeds 
+Tournament Schedule - For upcoming games
+Team Season Stats - For team performance
+Team Player Injuries - Critical for betting
+Pregame Odds Comparison - Core betting data
+Head-to-Head Comparison - Historical context
+League Standings - For team ranking context 
+Live Scores - For in-game betting 
+
+## the api key is included in the url but also in the env as GOALSERVE_API_KEY if you want to append it to the url to make it more secure
+
+### this doc only contains the feeds that we said our essential for our deep research workflow
+
+#### 1. Tournament Schedule Feed
+
+*   **Description:** Provides the schedule and results for games within a tournament/league.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/nba-shedule` (Replace `nba` with `ncaa` or `wnba` for other leagues.)
+*   **Refresh Period:** Every 2 hours (use live scores feed for faster updates)
+*   **Key Data Points:**
+    *   `date`: Match start date (Eastern Time).
+    *   `timezone`: Timezone for date and time attributes (EST/EDT).
+    *   `seasonType`: Season stage (Preseason, Regular season, Postseason).
+    *   `status`: Match status (Not Started, Postponed, Cancelled, Final).
+    *   `time`: Match start time (Eastern Time).
+    *   `hometeam` / `awayteam`: Team names and scores.
+*   **Notes:**
+    *   Use the `live score` endpoints for fast results updates and game status changes.
+
+#### 2. League Standings Feed
+
+*   **Description:** Displays current league standings with team points, wins, losses, and provides a list of all teams in the league.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/nba-standings` (For division standings)
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/nba-standings-conf` (For conference standings - NBA only)
+*   **Refresh Period:** Every 1 hour.
+*   **Key Data Points:**
+    *   `position`: Team ranking position.
+    *   `name`: Team name.
+    *   `won`: Total games won.
+    *   `lost`: Total games lost.
+    *   `percentage`: Winning percentage.
+    *   `home_record`: Home game record (wins-losses).
+    *   `road_record`: Away game record (wins-losses).
+*   **Notes:**
+    *   Provides team performance information.
+
+#### 3. Team Season Stats Feed
+
+*   **Description:** Displays accumulated team statistics for a given season. Available for NBA only.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/1066_team_stats` (Replace `1066` with the team ID.)
+*   **Refresh Period:** Every 1 hour.
+*   **Key Data Points:**
+    *   `<statistic team="[Team Name]" season="[Season Value]" id="[Team ID]">`: Overall container element.
+    *   `<category name="[Category Name]">`: Statistic category.
+        *   `General`: Games played, total rebounds, fouls, etc.
+        *   `Offensive`: Points, field goals, three-pointers, etc.
+        *   `Defensive`: Defensive rebounds, steals, blocks, etc.
+    *   `<team>`: Team statistics for each category.
+    *   `<opponents>`: Opponents statistics in matches with the team.
+*   **Notes:**
+    *   Use Team ID.
+    *   Statistics divided into team and opponent stats.
+
+#### 4. Team Player Injuries Reports Feed
+
+*   **Description:** Displays a list of suspended/injured players for a given team.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/1066_injuries` (Replace `1066` with the team ID.)
+*   **Refresh Period:** Every 1 hour.
+*   **Key Data Points:**
+    *   `<team name="[Team Name]" id="[Team ID]">`:  Identifies the team.
+    *   `<report date="[Date]" player_name="[Player Name]" status="[Status]" description="[Description]"/>`: Injury report for a player.
+        *   `date`: Date when player was sidelined.
+        *   `status`: Suspension status (Sidelined, Questionable - specify injury type).
+        *   `description`: Additional info (expected return date).
+*   **Notes:**
+    *   Use Team ID.
+    *   Injury types like Harmstring, Foot, Knee, etc., are listed in the `status`.
+
+#### 5. Pregame Odds Comparison Feed
+
+*   **Description:** Provides pre-game odds comparison between various bookmakers for games that have not yet started.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/nfl-shedule?showodds=1`
+*   **Refresh Period:** Varies (average every 30 seconds).
+*   **Key Data Points:**
+    *   `<match time="[Time]" contestID="[ID]" formatted_date="[Date]" status="Not Started" datetime_utc="[UTC Datetime]">`: Match details
+    *   `<odds ts="[Timestamp]" rotation_home="[Home Rotation]" rotation_away="[Away Rotation]">`: Odds details
+    *   `<type value="[Market Name]" id="[Market ID]">`: Betting market (e.g., Home/Away, Handicap, Over/Under)
+        *   `<bookmaker name="[Bookmaker Name]" id="[Bookmaker ID]">`: Bookmaker details
+        *   `<odd name="[Selection]" value="[Decimal Odds]" us="[US Odds]">`: Odd for the selection
+*   **Notes:**
+    *   Feed is compressed using GZIP. Implement GZIP decompression in your parser.
+    *   Filters: `date1`, `date2`, `bm` (bookmaker ID), `market` (market ID).
+
+#### 6. Head-to-Head Comparison Feed
+
+*   **Description:** Provides head-to-head statistics between two teams.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/h2h_1690-1681` (Replace `1690-1681` with the two team IDs separated by "-")
+*   **Refresh Period:** Every 1 hour.
+*   **Key Data Points:**
+    *   Access using two team IDs.
+    *   Provides last 50 games and overall data.
+    *   Includes matches comparison divided by tournaments.
+*   **Notes:**
+    *   Use Team ID.
+    *   Feed provides sections such as `top50`, `overall`, and `leagues`.
+
+#### 7. Live Game Scores Feed
+
+*   **Description:** Provides live game scores, timer information, and detailed individual player statistics during a live game.
+*   **URL Format:**
+    *   `https://www.goalserve.com/getfeed/---------/bsktbl/nba-scores`
+*   **Refresh Period:** Every 20 seconds.
+*   **Key Data Points:**
+    *   `<match date="[Date]" timezone="[Timezone]" status="[Status]" time="[Time]" timer="[Timer]" datetime_utc="[UTC Datetime]" id="[Match ID]">`
+        *   `status`: Updated in live.
+        *   `timer`: Minutes:seconds, updates in live.
+    *   `<hometeam>` / `<awayteam>`: Team scores.
+    *   `<player>`: Player statistics (points, rebounds, assists, etc.)
+*   **Notes:**
+    *   History available since 01.01.2010 using the `date` attribute.
+
+**Important:** Replace the placeholder `---------` in the URL formats with your actual API key or access token. Also, double-check that the team and league IDs are correct for the specific data you're requesting.
