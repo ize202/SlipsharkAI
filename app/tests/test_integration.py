@@ -1,6 +1,6 @@
 import pytest
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from ..functions.llm_functions import quick_research, analyze_query
 from ..models.betting_models import (
     QueryAnalysis,
@@ -73,7 +73,7 @@ async def test_quick_research_nba():
     
     # Validate timestamp
     last_updated = datetime.fromisoformat(result.last_updated)
-    assert datetime.now() - last_updated < timedelta(minutes=5)  # Should be very recent
+    assert datetime.now(UTC) - last_updated < timedelta(minutes=5)  # Should be very recent
 
 @pytest.mark.asyncio
 @requires_api_keys
@@ -138,8 +138,8 @@ async def test_quick_research_with_recency():
         assert response.citations is not None
         if response.citations:
             for citation in response.citations:
-                assert "url" in citation
-                assert isinstance(citation["url"], str)
+                assert citation.url  # Check that URL exists and is not empty
+                assert isinstance(citation.url, str)  # Verify it's a string
 
 @pytest.mark.asyncio
 async def test_quick_research_basic_query():
@@ -158,9 +158,9 @@ async def test_quick_research_basic_query():
         assert response.citations is not None
         if response.citations:  # Citations might be empty if no sources found
             for citation in response.citations:
-                assert "url" in citation
-                assert isinstance(citation["url"], str)
-                assert citation["url"].startswith("http")
+                assert citation.url  # Check that URL exists and is not empty
+                assert isinstance(citation.url, str)  # Verify it's a string
+                assert citation.url.startswith("http")
 
 @pytest.mark.asyncio
 async def test_analyze_query():
