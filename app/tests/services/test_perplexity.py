@@ -7,31 +7,47 @@ from app.tests.test_quick_research import SAMPLE_PERPLEXITY_RESPONSE
 from app.tests.test_quick_research_integration import requires_api_keys
 import json
 
-# Mock API responses - reuse from existing tests
-MOCK_QUICK_RESEARCH_RESPONSE = SAMPLE_PERPLEXITY_RESPONSE
+# Mock API responses
+MOCK_QUICK_RESEARCH_RESPONSE = {
+    "choices": [{
+        "message": {
+            "content": "Analysis of Lakers betting odds"
+        }
+    }],
+    "citations": [
+        {
+            "url": "https://example.com",
+            "title": "Lakers Game Analysis",
+            "snippet": "Recent performance analysis",
+            "published_date": "2024-02-23"
+        }
+    ],
+    "related_questions": [
+        "What are the Lakers' recent injuries?",
+        "How do the Lakers perform against the spread?"
+    ]
+}
 
 MOCK_ANALYZE_QUERY_RESPONSE = {
-    "choices": [
-        {
-            "message": {
-                "content": """{
-                    "raw_query": "Should I bet on the Lakers tonight?",
-                    "sport_type": "basketball",
-                    "is_deep_research": true,
-                    "confidence_score": 0.95,
-                    "required_data_sources": ["team_stats", "injuries", "odds", "h2h"],
-                    "teams": {
-                        "primary": "Lakers",
-                        "opponent": "Warriors",
-                        "normalized_names": {
-                            "primary": "Los Angeles Lakers",
-                            "opponent": "Golden State Warriors"
-                        }
+    "choices": [{
+        "message": {
+            "content": json.dumps({
+                "raw_query": "Should I bet on the Lakers tonight?",
+                "sport_type": "basketball",
+                "is_deep_research": True,
+                "confidence_score": 0.95,
+                "required_data_sources": ["team_stats", "injuries", "odds", "h2h"],
+                "teams": {
+                    "primary": "Lakers",
+                    "opponent": "Warriors",
+                    "normalized_names": {
+                        "primary": "Los Angeles Lakers",
+                        "opponent": "Golden State Warriors"
                     }
-                }"""
-            }
+                }
+            })
         }
-    ]
+    }]
 }
 
 @pytest_asyncio.fixture
@@ -62,6 +78,10 @@ async def test_quick_research(perplexity_service):
     assert response.content == "Analysis of Lakers betting odds"
     assert len(response.citations) == 1
     assert response.citations[0].url == "https://example.com"
+    assert response.citations[0].title == "Lakers Game Analysis"
+    assert response.citations[0].snippet == "Recent performance analysis"
+    assert response.citations[0].published_date == "2024-02-23"
+    assert len(response.related_questions) == 2
 
 @pytest.mark.asyncio
 @observe(name="test_perplexity_analyze_query")
@@ -83,6 +103,11 @@ async def test_analyze_query(perplexity_service):
     assert response.raw_query == "Should I bet on the Lakers tonight?"
     assert response.sport_type == "basketball"
     assert response.is_deep_research is True
+    assert response.confidence_score == 0.95
+    assert "team_stats" in response.required_data_sources
+    assert "injuries" in response.required_data_sources
+    assert "odds" in response.required_data_sources
+    assert "h2h" in response.required_data_sources
 
 @pytest.mark.asyncio
 @observe(name="test_perplexity_custom_prompt")

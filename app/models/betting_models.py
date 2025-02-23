@@ -69,4 +69,40 @@ class DeepResearchResult(BaseModel):
     confidence_score: float = Field(description="Overall confidence in the analysis (0-1)")
     citations: List[Citation] = Field(description="All sources used in the analysis")
     last_updated: str = Field(description="Timestamp of when this research was conducted")
-    metadata: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata about the analysis") 
+    metadata: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata about the analysis")
+
+class BetHistory(BaseModel):
+    """Model for bet details entries"""
+    entry_id: str
+    bet_type: str
+    sport: str
+    game_id: Optional[str] = None
+    odds: Optional[float] = None
+    boost_applied: Optional[bool] = None
+    boost_percentage: Optional[float] = None
+    cash_out_available: Optional[bool] = None
+    early_payout: Optional[bool] = None
+    void_reason: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class UserStats(BaseModel):
+    """Model for user betting statistics"""
+    user_id: str
+    entry_type: str
+    sport: str
+    period: str
+    total_entries: Optional[int]
+    won_entries: Optional[int]
+    total_stake: Optional[float]
+    total_payout: Optional[float]
+    roi: Optional[float]
+    updated_at: Optional[datetime]
+
+class UserPreferences(BaseModel):
+    """Model for user betting preferences"""
+    user_id: str
+    favorite_teams: List[str]
+    favorite_leagues: List[str]
+    stake_limits: Dict[str, float]
+    notification_preferences: Dict[str, bool]
+    updated_at: datetime 

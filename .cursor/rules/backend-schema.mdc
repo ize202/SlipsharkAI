@@ -5,7 +5,7 @@ globs:
 # Database Stuff
 
 ## MCP Connection
-Supabase MCP connection is enabled so you can connect directly to supabase using the MCP tool. The schema in this table might not be updated so don't hesitate to use the MCP tool to get up to date info. The MCP tool is only connected to the Dev database not the prod db
+IMPORTANT! Supabase MCP connection is enabled so you can connect directly to supabase using the MCP tool. The schema in this table might not be updated so don't hesitate to use the MCP tool to get up to date info. The MCP tool is only connected to the Dev database not the prod db
 
 ## Database Schema 
 
