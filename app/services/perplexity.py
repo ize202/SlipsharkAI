@@ -26,11 +26,20 @@ class PerplexityResponse(BaseModel):
 class PerplexityService:
     """Service for interacting with Perplexity AI API"""
     
-    def __init__(self):
+    def __init__(self, timeout: float = 30.0):
         """Initialize the service with API configuration"""
         self.base_url = "https://api.perplexity.ai/chat/completions"
-        self.default_model = "pplx-7b-online"
-        self.client = httpx.AsyncClient()
+        self.default_model = "sonar"
+        self.api_key = os.getenv("PERPLEXITY_API_KEY")
+        if not self.api_key:
+            raise ValueError("PERPLEXITY_API_KEY environment variable must be set")
+        self.client = httpx.AsyncClient(
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            },
+            timeout=timeout
+        )
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -72,10 +81,10 @@ class PerplexityService:
             payload = {
                 "model": self.default_model,
                 "messages": messages,
-                "temperature": 0.2,  # Lower temperature for more focused responses
-                "return_citations": True,
-                "search_recency_filter": search_recency,
-                "return_related_questions": True
+                "temperature": 0.2,
+                "max_tokens": 500,
+                "top_p": 0.9,
+                "search_recency_filter": search_recency
             }
             
             response = await self.client.post(self.base_url, json=payload)
@@ -84,17 +93,29 @@ class PerplexityService:
             data = await response.json()
             content = data["choices"][0]["message"]["content"]
             citations = [
-                Citation(url=citation["url"], text=citation.get("text", ""))
+                Citation(
+                    url=citation,
+                    title=None,
+                    snippet=None,
+                    published_date=None
+                )
                 for citation in data.get("citations", [])
             ]
             
             return PerplexityResponse(
                 content=content,
                 citations=citations,
-                related_questions=data.get("related_questions", [])
+                related_questions=[]
             )
                 
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout error in quick_research: {str(e)}")
+            raise Exception(f"API request timed out: {str(e)}")
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error in quick_research: {str(e)}")
+            raise Exception(f"HTTP error occurred: {str(e)}")
         except Exception as e:
+            logger.error(f"Error in quick_research: {str(e)}")
             raise Exception(f"Error in quick_research: {str(e)}")
 
     @observe(name="perplexity_analyze_query")
@@ -102,7 +123,7 @@ class PerplexityService:
         self,
         query: str,
         search_recency: str = "day"
-    ) -> QueryAnalysis:
+    ) -> str:
         """
         Analyze a user's query to determine intent and required data sources.
         
@@ -111,7 +132,7 @@ class PerplexityService:
             search_recency: Time window for search results ('hour', 'day', 'week', 'month')
             
         Returns:
-            QueryAnalysis containing structured analysis of the query
+            JSON string containing structured analysis of the query
         """
         try:
             system_prompt = """You are a query analysis system.
@@ -130,7 +151,9 @@ class PerplexityService:
             payload = {
                 "model": self.default_model,
                 "messages": messages,
-                "temperature": 0.1,  # Lower temperature for more consistent analysis
+                "temperature": 0.1,
+                "max_tokens": 500,
+                "top_p": 0.9,
                 "search_recency_filter": search_recency
             }
             
@@ -138,16 +161,8 @@ class PerplexityService:
             response.raise_for_status()
             
             data = await response.json()
-            content = data["choices"][0]["message"]["content"]
-            analysis = json.loads(content)  # This will raise an error if invalid JSON
-            
-            return QueryAnalysis(
-                raw_query=query,
-                sport_type=analysis.get("sport_type"),
-                is_deep_research=analysis.get("is_deep_research", False),
-                confidence_score=float(analysis.get("confidence_score", 0.0)),
-                required_data_sources=analysis.get("required_data_sources", [])
-            )
+            return data["choices"][0]["message"]["content"]
                 
         except Exception as e:
+            logger.error(f"Error in analyze_query: {str(e)}")
             raise Exception(f"Error in analyze_query: {str(e)}")
