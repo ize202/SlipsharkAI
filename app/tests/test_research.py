@@ -8,10 +8,10 @@ from ..functions.llm_functions import quick_research, analyze_query
 from ..models.betting_models import (
     QueryAnalysis,
     QuickResearchResult,
-    Citation,
+    Citation as BettingCitation,
     SportType
 )
-from ..services.perplexity import PerplexityResponse
+from ..services.perplexity import PerplexityResponse, Citation
 
 # Sample test data
 SAMPLE_QUERY = QueryAnalysis(
@@ -36,18 +36,8 @@ The line movement suggests sharp money on Lakers, but AD's injury adds risk."""
         }
     }],
     "citations": [
-        {
-            "url": "https://sports.example.com/odds/lakers-warriors",
-            "title": "Lakers vs Warriors Odds",
-            "snippet": "Lakers -3.5 (-110), Warriors +3.5 (-110)",
-            "published_date": "2024-02-23"
-        },
-        {
-            "url": "https://sports.example.com/news/davis-injury",
-            "title": "Anthony Davis Injury Update",
-            "snippet": "Davis listed as probable with ankle soreness",
-            "published_date": "2024-02-23"
-        }
+        "https://sports.example.com/odds/lakers-warriors",
+        "https://sports.example.com/news/davis-injury"
     ],
     "related_questions": [
         "What is the Lakers' record against the spread this season?",
@@ -62,7 +52,7 @@ async def test_quick_research_success():
     # Mock the Perplexity service response
     mock_response = PerplexityResponse(
         content=SAMPLE_PERPLEXITY_RESPONSE["choices"][0]["message"]["content"],
-        citations=SAMPLE_PERPLEXITY_RESPONSE["citations"],
+        citations=[Citation(url=url) for url in SAMPLE_PERPLEXITY_RESPONSE["citations"]],
         related_questions=SAMPLE_PERPLEXITY_RESPONSE["related_questions"]
     )
     
@@ -81,7 +71,7 @@ async def test_quick_research_success():
         
         # Verify citations were processed
         assert len(result.citations) == 2
-        assert isinstance(result.citations[0], Citation)
+        assert isinstance(result.citations[0], BettingCitation)
         assert result.citations[0].url == "https://sports.example.com/odds/lakers-warriors"
         
         # Check confidence score calculation
@@ -101,8 +91,8 @@ async def test_quick_research_no_citations():
     # Mock response without citations
     mock_response = PerplexityResponse(
         content="Simple analysis without citations",
-        citations=None,
-        related_questions=None
+        citations=[],
+        related_questions=[]
     )
     
     with patch("app.services.perplexity.PerplexityService.quick_research", 
@@ -135,8 +125,8 @@ async def test_quick_research_invalid_response():
     # Mock response with invalid format
     mock_response = PerplexityResponse(
         content="",  # Empty content
-        citations=None,
-        related_questions=None
+        citations=[],
+        related_questions=[]
     )
     
     with patch("app.services.perplexity.PerplexityService.quick_research", 
@@ -158,7 +148,7 @@ async def test_deep_research_recommendation():
     # Mock response with conditions that should trigger deep research
     mock_response = PerplexityResponse(
         content="A very long analysis " * 50,  # Long content
-        citations=[{"url": "url1"}, {"url": "url2"}, {"url": "url3"}],  # Many citations
+        citations=[Citation(url=f"url{i}") for i in range(3)],  # Many citations
         related_questions=["Q1", "Q2", "Q3"]  # Many questions
     )
     

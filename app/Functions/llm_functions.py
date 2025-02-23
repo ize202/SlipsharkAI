@@ -76,10 +76,10 @@ async def quick_research(query: QueryAnalysis) -> QuickResearchResult:
             if result.citations:
                 for cite in result.citations:
                     citations.append(Citation(
-                        url=cite.get("url", ""),
-                        title=cite.get("title"),
-                        snippet=cite.get("snippet"),
-                        published_date=cite.get("published_date")
+                        url=cite.url,
+                        title=cite.title,
+                        snippet=cite.snippet,
+                        published_date=cite.published_date
                     ))
             
             # Create the research result
@@ -99,14 +99,33 @@ async def quick_research(query: QueryAnalysis) -> QuickResearchResult:
 
 def extract_key_points(content: str) -> List[str]:
     """Extract key betting insights from the content"""
-    # TODO: Implement more sophisticated key point extraction
-    # For now, split on newlines and filter for bullet points
     points = []
+    
+    # Handle empty content case
+    if not content.strip():
+        return ["No content available"]
+        
     for line in content.split("\n"):
         line = line.strip()
-        if line.startswith(("-", "•", "*")) or line.startswith(("1.", "2.", "3.")):
-            points.append(line.lstrip("- •*123456789. "))
-    return points or [content]  # Return full content as single point if no clear points found
+        # Match bullet points, numbered lists, or lines starting with key betting terms
+        if (line.startswith(("-", "•", "*")) or 
+            any(line.startswith(f"{i}.") for i in range(1, 10)) or
+            any(line.lower().startswith(term) for term in ["odds:", "line:", "injury:", "update:"])):
+            # Clean up the line by removing bullet points and other markers
+            clean_line = line.lstrip("- •*1234567890. ")
+            if clean_line:  # Only add non-empty lines
+                points.append(clean_line)
+    
+    # If no bullet points found, try to break content into meaningful segments
+    if not points and content.strip():
+        sentences = [s.strip() for s in content.split(".") if s.strip()]
+        points = [s + "." for s in sentences if len(s) > 20]  # Only include substantial sentences
+        
+        # If still no points, use the entire content as one point
+        if not points:
+            points = [content.strip()]
+    
+    return points
 
 def calculate_confidence_score(result: PerplexityResponse) -> float:
     """Calculate confidence score based on citations and content"""

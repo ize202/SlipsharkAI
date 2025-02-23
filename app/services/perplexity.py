@@ -1,18 +1,26 @@
 from typing import Optional, Dict, Any, List
 import os
 import logging
+import json
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langfuse.decorators import observe
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
+class Citation(BaseModel):
+    """Citation from Perplexity API"""
+    url: str
+    title: Optional[str] = None
+    snippet: Optional[str] = None
+    published_date: Optional[str] = None
+
 class PerplexityResponse(BaseModel):
     """Structured response from Perplexity API"""
     content: str
-    citations: Optional[List[Dict[str, str]]] = None
-    related_questions: Optional[List[str]] = None
+    citations: Optional[List[Citation]] = Field(default=[])
+    related_questions: Optional[List[str]] = Field(default=[])
 
 class PerplexityService:
     """Service for interacting with Perplexity AI API"""
@@ -88,8 +96,13 @@ class PerplexityService:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
                 
-                # Extract citations if available
-                citations = data.get("citations", [])
+                # Convert URL list to citation dictionaries
+                citations = []
+                if "citations" in data:
+                    for url in data["citations"]:
+                        citations.append(Citation(url=url))
+                
+                # Extract related questions if available
                 related_questions = data.get("related_questions", [])
                 
                 return PerplexityResponse(
@@ -110,7 +123,7 @@ class PerplexityService:
         self,
         query: str,
         search_recency: str = "day"
-    ) -> Dict[str, Any]:
+    ) -> str:
         """
         Analyze a sports betting query to determine intent and required data.
         
@@ -119,15 +132,18 @@ class PerplexityService:
             search_recency: Time window for search results
             
         Returns:
-            Dict containing the analysis results
+            JSON string containing the analysis results
         """
         try:
-            system_prompt = """Analyze this sports betting query.
-            Identify:
-            1. The sport and teams/players involved
-            2. The type of bet or analysis requested
-            3. What information would be most relevant
-            Format the response as JSON."""
+            system_prompt = """Analyze this sports betting query and return a JSON object with the following fields:
+            {
+                "raw_query": "the original query",
+                "sport_type": "one of: football, basketball, baseball, hockey, soccer, other",
+                "is_deep_research": "boolean indicating if deep research is needed",
+                "confidence_score": "float between 0 and 1",
+                "required_data_sources": ["list of required data sources"]
+            }
+            Format as a plain JSON object, no markdown."""
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -146,7 +162,17 @@ class PerplexityService:
                 response.raise_for_status()
                 
                 data = response.json()
-                return data["choices"][0]["message"]["content"]
+                content = data["choices"][0]["message"]["content"]
+                
+                # Clean up any markdown formatting
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].strip()
+                
+                # Validate it's proper JSON
+                json.loads(content)  # This will raise an error if invalid JSON
+                return content
                 
         except httpx.HTTPError as e:
             logger.error(f"HTTP error during Perplexity API call: {str(e)}")
