@@ -266,64 +266,113 @@ class GoalserveNBAService:
     
     def get_team_id(self, team_name: str) -> str:
         """Get the Goalserve team ID for a given team name"""
+        logger.debug(f"Looking up team ID for: '{team_name}'")
+        logger.debug(f"Available team mappings: {json.dumps(self._team_ids, indent=2)}")
         team_id = self._team_ids.get(team_name)
         if not team_id:
+            logger.error(f"Could not find team ID for '{team_name}'. Available teams: {list(self._team_ids.keys())}")
             raise ValueError(f"Unknown team name: {team_name}")
+        logger.info(f"Found team ID '{team_id}' for team '{team_name}'")
         return team_id
     
     @observe(name="goalserve_get_upcoming_games")
     async def get_upcoming_games(self, team_name: str) -> List[NBASchedule]:
-        """Get upcoming games schedule for an NBA team"""
-        try:
-            # Note: The endpoint is "nba-schedule" not "nba-shedule" (fixed typo)
-            data = await self._make_request("nba-schedule")
-            games = []
-            for match in data.get("matches", []):
-                home_team = match.get("home_team", {}).get("name")
-                away_team = match.get("away_team", {}).get("name")
-                if team_name in [home_team, away_team]:
-                    games.append(NBASchedule(
-                        game_id=match.get("id"),
-                        game_date=parse_date(match.get("date")),
-                        home_team=home_team,
-                        away_team=away_team,
-                        venue=match.get("venue_name"),
-                        status=match.get("status", "scheduled"),
-                        score_home=match.get("home_team", {}).get("totalscore"),
-                        score_away=match.get("away_team", {}).get("totalscore")
-                    ))
-            return games
-                
-        except Exception as e:
-            logger.error(f"Error getting upcoming games: {str(e)}")
-            raise
+        """Get upcoming games for a specific team."""
+        data = await self._make_request("nba-shedule")
+        games = []
+        for match in data.get("matches", []):
+            home_team = match.get("home_team", {}).get("name")
+            away_team = match.get("away_team", {}).get("name")
+            if team_name in [home_team, away_team]:
+                games.append(NBASchedule(
+                    game_id=match.get("id"),
+                    game_date=parse_date(match.get("date")),
+                    home_team=home_team,
+                    away_team=away_team,
+                    venue=match.get("venue_name"),
+                    status=match.get("status", "scheduled"),
+                    score_home=match.get("home_team", {}).get("totalscore"),
+                    score_away=match.get("away_team", {}).get("totalscore")
+                ))
+        return games
     
     @observe(name="goalserve_get_team_stats")
-    async def get_team_stats(self, team_id: str) -> Dict[str, Any]:
-        """Get team stats from Goalserve API."""
+    async def get_team_stats(self, team_name_or_id: str) -> Dict[str, Any]:
+        """Get team stats from Goalserve API.
+        
+        Args:
+            team_name_or_id (str): Either the team name or team ID. If a name is provided,
+                                  it will be converted to an ID using the standings data.
+            
+        Returns:
+            Dict[str, Any]: A dictionary containing team statistics organized by category
+            
+        Raises:
+            ValueError: If the response structure is invalid or missing required data
+        """
         try:
+            # If a team name was provided, convert it to an ID
+            team_id = team_name_or_id
+            if not team_name_or_id.isdigit():
+                team_id = self.get_team_id(team_name_or_id)
+                logger.info(f"Converted team name '{team_name_or_id}' to ID '{team_id}'")
+
             # Use the correct endpoint format: team_id_team_stats
             response = await self._make_request(f"{team_id}_team_stats")
             
             if not isinstance(response, dict) or "statistic" not in response:
-                raise ValueError(f"Invalid response format: {response}")
+                logger.error(f"Invalid response format: {json.dumps(response, indent=2)[:1000]}")
+                raise ValueError(f"Invalid response format for team {team_id}")
 
             stats = response["statistic"]
             if not isinstance(stats, dict) or "category" not in stats:
-                raise ValueError(f"Invalid stats format: {stats}")
+                logger.error(f"Invalid stats format: {json.dumps(stats, indent=2)[:1000]}")
+                raise ValueError(f"Invalid stats format for team {team_id}")
 
+            # Get categories - handle both single category and list of categories
             categories = stats["category"]
             if not isinstance(categories, list):
-                categories = [categories]  # Handle single category case
+                categories = [categories]
 
-            # Initialize stats dictionary
+            # Initialize stats dictionary with default values
             team_stats = {
-                "games_played": 0,
-                "points_per_game": 0,
-                "rebounds_per_game": 0,
-                "assists_per_game": 0,
-                "field_goal_percentage": 0,
-                "three_point_percentage": 0
+                "general": {
+                    "games_played": 0,
+                    "total_rebounds": 0,
+                    "rebounds_avg": 0.0,
+                    "technical_fouls_total": 0,
+                    "fouls_total": 0,
+                    "fouls_avg": 0.0,
+                    "defensive_rebounds_total": 0,
+                    "defensive_rebounds_avg": 0.0,
+                    "steals_total": 0,
+                    "steals_avg": 0.0,
+                    "blocks_total": 0,
+                    "blocks_avg": 0.0
+                },
+                "offensive": {
+                    "points_avg": 0.0,
+                    "points_total": 0,
+                    "fieldgoals_avg": 0.0,
+                    "fieldgoals_attempts_avg": 0.0,
+                    "fieldgoals_pct": 0.0,
+                    "threepoint_avg": 0.0,
+                    "threepoint_attempts_avg": 0.0,
+                    "threepoint_pct": 0.0,
+                    "freethrows_avg": 0.0,
+                    "freethrows_attempts_avg": 0.0,
+                    "freethrows_pct": 0.0,
+                    "assists_avg": 0.0,
+                    "offensive_rebounds_avg": 0.0
+                },
+                "defensive": {
+                    "defensive_rebounds_total": 0,
+                    "defensive_rebounds_avg": 0.0,
+                    "steals_total": 0,
+                    "steals_avg": 0.0,
+                    "blocks_total": 0,
+                    "blocks_avg": 0.0
+                }
             }
 
             # Process each category
@@ -331,31 +380,70 @@ class GoalserveNBAService:
                 if not isinstance(category, dict) or "name" not in category:
                     continue
 
-                # Get team stats from the team section
+                category_name = category["name"].lower()
                 team_data = category.get("team", {})
+                
                 if not team_data:
+                    logger.warning(f"No team data found for category {category_name}")
                     continue
 
-                if category["name"] == "Game":
-                    team_stats["games_played"] = float(team_data.get("games_played", 0))
-                    team_stats["rebounds_per_game"] = float(team_data.get("rebounds_per_game", 0))
-                    team_stats["assists_per_game"] = float(team_data.get("assists_per_game", 0))
-                    team_stats["points_per_game"] = float(team_data.get("points_per_game", 0))
+                # Update stats based on category
+                if category_name == "general":
+                    for key in team_stats["general"].keys():
+                        if key in team_data:
+                            try:
+                                team_stats["general"][key] = float(team_data[key]) if "avg" in key else int(team_data[key])
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Error converting {key} value: {team_data[key]}, Error: {str(e)}")
+                                
+                elif category_name == "offensive":
+                    for key in team_stats["offensive"].keys():
+                        if key in team_data:
+                            try:
+                                team_stats["offensive"][key] = float(team_data[key])
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Error converting {key} value: {team_data[key]}, Error: {str(e)}")
+                                
+                elif category_name == "defensive":
+                    for key in team_stats["defensive"].keys():
+                        if key in team_data:
+                            try:
+                                team_stats["defensive"][key] = float(team_data[key]) if "avg" in key else int(team_data[key])
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Error converting {key} value: {team_data[key]}, Error: {str(e)}")
 
-                elif category["name"] == "Shooting":
-                    team_stats["field_goal_percentage"] = float(team_data.get("fg_pct", 0))
-                    team_stats["three_point_percentage"] = float(team_data.get("three_point_pct", 0))
+            # Add metadata
+            team_stats["team_id"] = team_id
+            team_stats["team_name"] = stats.get("team", "")
+            team_stats["season"] = stats.get("season", "")
 
             return team_stats
 
         except Exception as e:
-            logger.error(f"Invalid team stats data structure: {e}")
-            raise ValueError(f"Invalid team stats data structure for team {team_id}") from e
+            logger.error(f"Error getting team stats for team {team_id}: {str(e)}")
+            raise ValueError(f"Error getting team stats for team {team_id}") from e
     
     @observe(name="goalserve_get_player_stats")
-    async def get_player_stats(self, team_id: str) -> List[NBAPlayerStats]:
-        """Get current season statistics for all players on an NBA team"""
+    async def get_player_stats(self, team_name_or_id: str) -> List[NBAPlayerStats]:
+        """Get current season statistics for all players on an NBA team
+        
+        Args:
+            team_name_or_id (str): Either the team name or team ID. If a name is provided,
+                                  it will be converted to an ID using the standings data.
+        
+        Returns:
+            List[NBAPlayerStats]: List of player statistics
+            
+        Raises:
+            ValueError: If the team cannot be found or if there's an error getting stats
+        """
         try:
+            # If a team name was provided, convert it to an ID
+            team_id = team_name_or_id
+            if not team_name_or_id.isdigit():
+                team_id = self.get_team_id(team_name_or_id)
+                logger.info(f"Converted team name '{team_name_or_id}' to ID '{team_id}'")
+
             # Use the correct endpoint format: team_id_stats
             response = await self._make_request(f"{team_id}_stats")
             logger.debug(f"Player stats response: {json.dumps(response, indent=2)[:1000]}")
@@ -409,37 +497,27 @@ class GoalserveNBAService:
             raise ValueError(f"Error getting player stats for team {team_id}") from e
     
     @observe(name="goalserve_get_game_odds")
-    async def get_odds_comparison(self, date1: Optional[str] = None, date2: Optional[str] = None) -> List[NBAGameOdds]:
-        """Get odds comparison from various bookmakers for a date range"""
-        try:
-            endpoint = "nba-schedule"  # Fixed from nba-shedule
-            params = {"showodds": "1"}
-            if date1:
-                params["date1"] = date1
-            if date2:
-                params["date2"] = date2
+    async def get_odds_comparison(self, team_name: str) -> List[NBAGameOdds]:
+        """Get odds comparison for upcoming games involving a specific team."""
+        endpoint = "nba-shedule"
+        params = {"showodds": "1"}
+        data = await self._make_request(endpoint, params)
 
-            data = await self._make_request(endpoint, params)
-
-            odds_list = []
-            for match in data.get("matches", []):
-                odds = match.get("odds", {})
-                home_team = match.get("home_team", {}).get("name")
-                away_team = match.get("away_team", {}).get("name")
-                odds_list.append(NBAGameOdds(
-                    game_id=match.get("id"),
-                    home_team=home_team,
-                    away_team=away_team,
-                    home_team_odds=float(odds.get("home_odds", "0.0")),
-                    away_team_odds=float(odds.get("away_odds", "0.0")),
-                    spread=float(odds.get("spread", "0.0")),
-                    total=float(odds.get("total", "0.0"))
-                ))
-            return odds_list
-                
-        except Exception as e:
-            logger.error(f"Error getting odds comparison: {str(e)}")
-            raise
+        odds_list = []
+        for match in data.get("matches", []):
+            odds = match.get("odds", {})
+            home_team = match.get("home_team", {}).get("name")
+            away_team = match.get("away_team", {}).get("name")
+            odds_list.append(NBAGameOdds(
+                game_id=match.get("id"),
+                home_team=home_team,
+                away_team=away_team,
+                home_team_odds=float(odds.get("home_odds", "0.0")),
+                away_team_odds=float(odds.get("away_odds", "0.0")),
+                spread=float(odds.get("spread", "0.0")),
+                total=float(odds.get("total", "0.0"))
+            ))
+        return odds_list
     
     @observe(name="goalserve_get_head_to_head")
     async def get_head_to_head(self, team1_id: str, team2_id: str) -> NBAHeadToHead:
@@ -544,51 +622,25 @@ class GoalserveNBAService:
             # Initialize team mappings
             self._team_ids = {}
             
-            # Handle both XML and JSON response formats
-            if "standings" in data:
-                # JSON format
+            # Handle the nested format
+            if "standings" in data and isinstance(data["standings"], dict):
                 standings = data["standings"]
-                if isinstance(standings, dict):
-                    # Conference-based structure
-                    for conference, teams in standings.items():
-                        if isinstance(teams, list):
-                            for team in teams:
-                                if isinstance(team, dict):
-                                    name = team.get("name", "")
-                                    team_id = team.get("id", "")
-                                    if name and team_id:
-                                        # Clean up team name
-                                        if name.startswith("USA: NBA "):
-                                            name = name[9:]
-                                        self._team_ids[name] = team_id
-                                        logger.debug(f"Added team mapping: {name} -> {team_id}")
-                elif isinstance(standings, dict) and "category" in standings:
-                    # XML-converted format
+                if "category" in standings and isinstance(standings["category"], dict):
                     category = standings["category"]
-                    leagues = category.get("league", [])
-                    if not isinstance(leagues, list):
-                        leagues = [leagues]
-                    
-                    for league in leagues:
-                        divisions = league.get("division", [])
-                        if not isinstance(divisions, list):
-                            divisions = [divisions]
-                        
-                        for division in divisions:
-                            teams = division.get("team", [])
-                            if not isinstance(teams, list):
-                                teams = [teams]
-                            
-                            for team in teams:
-                                if isinstance(team, dict):
-                                    name = team.get("name", "")
-                                    team_id = team.get("id", "")
-                                    if name and team_id:
-                                        # Clean up team name
-                                        if name.startswith("USA: NBA "):
-                                            name = name[9:]
-                                        self._team_ids[name] = team_id
-                                        logger.debug(f"Added team mapping: {name} -> {team_id}")
+                    if "league" in category and isinstance(category["league"], list):
+                        for league in category["league"]:
+                            if "division" in league and isinstance(league["division"], list):
+                                for division in league["division"]:
+                                    if "team" in division and isinstance(division["team"], list):
+                                        for team in division["team"]:
+                                            name = team.get("name", "")
+                                            team_id = team.get("id", "")
+                                            if name and team_id:
+                                                # Clean up team name
+                                                if name.startswith("USA: NBA "):
+                                                    name = name[9:]
+                                                self._team_ids[name] = team_id
+                                                logger.debug(f"Added team mapping: {name} -> {team_id}")
             
             if not self._team_ids:
                 logger.error("No team IDs were loaded from the standings data")
@@ -601,5 +653,5 @@ class GoalserveNBAService:
         except Exception as e:
             logger.error(f"Error loading team IDs: {str(e)}")
             logger.error("Team ID loading failed. Some methods may not work correctly.")
-            self._team_ids = {}  # Reset to empty dict on failure
-            # Don't raise here, let the specific methods handle missing team IDs 
+            self._team_ids = {}  # Reset to empty dict on error
+            raise 
