@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sports Betting Research Assistant - Beta</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: #f8f9fa;
+            color: #212529;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        .card-header {
+            background-color: #0d6efd;
+            color: white;
+            font-weight: 600;
+        }
+        .form-control {
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 16px;
+        }
+        .btn-primary {
+            background-color: #0d6efd;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+        }
+        .result-container {
+            margin-top: 30px;
+        }
+        .loading {
+            text-align: center;
+            margin: 20px 0;
+            display: none;
+        }
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+        .key-points {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        .key-points li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .key-points li:last-child {
+            border-bottom: none;
+        }
+        .citations {
+            font-size: 14px;
+            color: #6c757d;
+        }
+        .citation-link {
+            color: #0d6efd;
+            text-decoration: none;
+        }
+        .citation-link:hover {
+            text-decoration: underline;
+        }
+        .deep-research-btn {
+            margin-top: 20px;
+        }
+        .insights-container {
+            margin-top: 20px;
+        }
+        .insight-card {
+            margin-bottom: 15px;
+            border-left: 4px solid #0d6efd;
+        }
+        .risk-card {
+            border-left: 4px solid #dc3545;
+        }
+        .confidence-meter {
+            height: 8px;
+            border-radius: 4px;
+            background-color: #e9ecef;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .confidence-level {
+            height: 100%;
+            background-color: #0d6efd;
+        }
+        .beta-badge {
+            background-color: #fd7e14;
+            color: white;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Sports Betting Research Assistant <span class="beta-badge">BETA</span></h1>
+            <p class="lead">Ask any sports betting question and get instant research</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                Research Query
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="queryInput" class="form-label">What would you like to research?</label>
+                    <textarea class="form-control" id="queryInput" rows="3" placeholder="Example: Should I bet on the Lakers to cover the spread against the Nuggets tonight?"></textarea>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="deepResearchCheck">
+                    <label class="form-check-label" for="deepResearchCheck">
+                        Force Deep Research (slower but more comprehensive)
+                    </label>
+                </div>
+                <button type="button" class="btn btn-primary" id="researchBtn">Research</button>
+            </div>
+        </div>
+
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Researching your query...</p>
+        </div>
+
+        <div class="result-container" id="quickResultContainer" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    Quick Research Results
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title" id="quickSummary"></h5>
+                    <div class="confidence-meter mt-3 mb-3">
+                        <div class="confidence-level" id="quickConfidence"></div>
+                    </div>
+                    <p class="text-muted small">Confidence: <span id="quickConfidenceText"></span>%</p>
+                    
+                    <h6 class="mt-4">Key Points:</h6>
+                    <ul class="key-points" id="quickKeyPoints"></ul>
+                    
+                    <div class="citations mt-4">
+                        <h6>Sources:</h6>
+                        <div id="quickCitations"></div>
+                    </div>
+                    
+                    <div class="mt-4" id="deepResearchRecommendation" style="display: none;">
+                        <div class="alert alert-info">
+                            <strong>Recommendation:</strong> This query would benefit from deeper research.
+                        </div>
+                        <button type="button" class="btn btn-secondary deep-research-btn" id="deepResearchBtn">
+                            Perform Deep Research
+                        </button>
+                    </div>
+                </div>
+                <div class="card-footer text-muted">
+                    Last updated: <span id="quickLastUpdated"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="result-container" id="deepResultContainer" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    Deep Research Results
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title" id="deepSummary"></h5>
+                    <div class="confidence-meter mt-3 mb-3">
+                        <div class="confidence-level" id="deepConfidence"></div>
+                    </div>
+                    <p class="text-muted small">Confidence: <span id="deepConfidenceText"></span>%</p>
+                    
+                    <div class="recommended-bet mt-4" id="recommendedBetContainer">
+                        <h6>Recommended Bet:</h6>
+                        <div class="alert alert-success" id="recommendedBet"></div>
+                    </div>
+                    
+                    <h6 class="mt-4">Insights:</h6>
+                    <div class="insights-container" id="insightsContainer"></div>
+                    
+                    <h6 class="mt-4">Risk Factors:</h6>
+                    <div class="insights-container" id="riskFactorsContainer"></div>
+                    
+                    <div class="citations mt-4">
+                        <h6>Sources:</h6>
+                        <div id="deepCitations"></div>
+                    </div>
+                </div>
+                <div class="card-footer text-muted">
+                    Last updated: <span id="deepLastUpdated"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const apiUrl = '/analyze';
+            const extendUrl = '/extend';
+            
+            const queryInput = document.getElementById('queryInput');
+            const deepResearchCheck = document.getElementById('deepResearchCheck');
+            const researchBtn = document.getElementById('researchBtn');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const quickResultContainer = document.getElementById('quickResultContainer');
+            const deepResultContainer = document.getElementById('deepResultContainer');
+            const deepResearchBtn = document.getElementById('deepResearchBtn');
+            
+            let currentQuickResult = null;
+            let originalQuery = '';
+            
+            researchBtn.addEventListener('click', async function() {
+                const query = queryInput.value.trim();
+                originalQuery = query;
+                
+                if (!query) {
+                    alert('Please enter a research query');
+                    return;
+                }
+                
+                // Reset UI
+                quickResultContainer.style.display = 'none';
+                deepResultContainer.style.display = 'none';
+                loadingIndicator.style.display = 'block';
+                
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            query: query,
+                            force_deep_research: deepResearchCheck.checked
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('API request failed');
+                    }
+                    
+                    const result = await response.json();
+                    
+                    // Determine if it's a quick or deep result
+                    if (result.hasOwnProperty('insights')) {
+                        // Deep research result
+                        displayDeepResult(result);
+                    } else {
+                        // Quick research result
+                        currentQuickResult = result;
+                        displayQuickResult(result);
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('An error occurred while processing your request. Please try again.');
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            });
+            
+            deepResearchBtn.addEventListener('click', async function() {
+                if (!currentQuickResult) {
+                    return;
+                }
+                
+                // Reset UI
+                quickResultContainer.style.display = 'none';
+                deepResultContainer.style.display = 'none';
+                loadingIndicator.style.display = 'block';
+                
+                try {
+                    const response = await fetch(extendUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            original_query: originalQuery,
+                            quick_result: currentQuickResult
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('API request failed');
+                    }
+                    
+                    const result = await response.json();
+                    displayDeepResult(result);
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('An error occurred while processing your request. Please try again.');
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            });
+            
+            function displayQuickResult(result) {
+                document.getElementById('quickSummary').textContent = result.summary;
+                
+                const confidencePercent = Math.round(result.confidence_score * 100);
+                document.getElementById('quickConfidence').style.width = `${confidencePercent}%`;
+                document.getElementById('quickConfidenceText').textContent = confidencePercent;
+                
+                const keyPointsList = document.getElementById('quickKeyPoints');
+                keyPointsList.innerHTML = '';
+                result.key_points.forEach(point => {
+                    const li = document.createElement('li');
+                    li.textContent = point;
+                    keyPointsList.appendChild(li);
+                });
+                
+                const citationsDiv = document.getElementById('quickCitations');
+                citationsDiv.innerHTML = '';
+                if (result.citations && result.citations.length > 0) {
+                    result.citations.forEach(citation => {
+                        const p = document.createElement('p');
+                        const a = document.createElement('a');
+                        a.href = citation.url;
+                        a.target = '_blank';
+                        a.className = 'citation-link';
+                        a.textContent = citation.title || citation.url;
+                        p.appendChild(a);
+                        if (citation.snippet) {
+                            const span = document.createElement('span');
+                            span.textContent = ` - ${citation.snippet}`;
+                            p.appendChild(span);
+                        }
+                        citationsDiv.appendChild(p);
+                    });
+                } else {
+                    citationsDiv.textContent = 'No citations available';
+                }
+                
+                document.getElementById('quickLastUpdated').textContent = result.last_updated;
+                
+                // Show deep research recommendation if needed
+                if (result.deep_research_recommended) {
+                    document.getElementById('deepResearchRecommendation').style.display = 'block';
+                } else {
+                    document.getElementById('deepResearchRecommendation').style.display = 'none';
+                }
+                
+                quickResultContainer.style.display = 'block';
+            }
+            
+            function displayDeepResult(result) {
+                document.getElementById('deepSummary').textContent = result.summary;
+                
+                const confidencePercent = Math.round(result.confidence_score * 100);
+                document.getElementById('deepConfidence').style.width = `${confidencePercent}%`;
+                document.getElementById('deepConfidenceText').textContent = confidencePercent;
+                
+                // Recommended bet
+                const recommendedBetContainer = document.getElementById('recommendedBetContainer');
+                const recommendedBet = document.getElementById('recommendedBet');
+                if (result.recommended_bet) {
+                    recommendedBet.textContent = result.recommended_bet;
+                    recommendedBetContainer.style.display = 'block';
+                } else {
+                    recommendedBetContainer.style.display = 'none';
+                }
+                
+                // Insights
+                const insightsContainer = document.getElementById('insightsContainer');
+                insightsContainer.innerHTML = '';
+                result.insights.forEach(insight => {
+                    const card = document.createElement('div');
+                    card.className = 'card insight-card';
+                    
+                    const cardBody = document.createElement('div');
+                    cardBody.className = 'card-body';
+                    
+                    const category = document.createElement('h6');
+                    category.className = 'card-subtitle mb-2 text-muted';
+                    category.textContent = insight.category;
+                    
+                    const insightText = document.createElement('p');
+                    insightText.className = 'card-text';
+                    insightText.textContent = insight.insight;
+                    
+                    const impact = document.createElement('p');
+                    impact.className = 'card-text';
+                    impact.innerHTML = `<strong>Impact:</strong> ${insight.impact}`;
+                    
+                    cardBody.appendChild(category);
+                    cardBody.appendChild(insightText);
+                    cardBody.appendChild(impact);
+                    card.appendChild(cardBody);
+                    insightsContainer.appendChild(card);
+                });
+                
+                // Risk factors
+                const riskFactorsContainer = document.getElementById('riskFactorsContainer');
+                riskFactorsContainer.innerHTML = '';
+                result.risk_factors.forEach(risk => {
+                    const card = document.createElement('div');
+                    card.className = 'card insight-card risk-card';
+                    
+                    const cardBody = document.createElement('div');
+                    cardBody.className = 'card-body';
+                    
+                    const severity = document.createElement('h6');
+                    severity.className = 'card-subtitle mb-2 text-muted';
+                    severity.textContent = `Severity: ${risk.severity}`;
+                    
+                    const riskText = document.createElement('p');
+                    riskText.className = 'card-text';
+                    riskText.textContent = risk.factor;
+                    
+                    if (risk.mitigation) {
+                        const mitigation = document.createElement('p');
+                        mitigation.className = 'card-text';
+                        mitigation.innerHTML = `<strong>Mitigation:</strong> ${risk.mitigation}`;
+                        cardBody.appendChild(mitigation);
+                    }
+                    
+                    cardBody.appendChild(severity);
+                    cardBody.appendChild(riskText);
+                    card.appendChild(cardBody);
+                    riskFactorsContainer.appendChild(card);
+                });
+                
+                // Citations
+                const citationsDiv = document.getElementById('deepCitations');
+                citationsDiv.innerHTML = '';
+                if (result.citations && result.citations.length > 0) {
+                    result.citations.forEach(citation => {
+                        const p = document.createElement('p');
+                        const a = document.createElement('a');
+                        a.href = citation.url;
+                        a.target = '_blank';
+                        a.className = 'citation-link';
+                        a.textContent = citation.title || citation.url;
+                        p.appendChild(a);
+                        if (citation.snippet) {
+                            const span = document.createElement('span');
+                            span.textContent = ` - ${citation.snippet}`;
+                            p.appendChild(span);
+                        }
+                        citationsDiv.appendChild(p);
+                    });
+                } else {
+                    citationsDiv.textContent = 'No citations available';
+                }
+                
+                document.getElementById('deepLastUpdated').textContent = result.last_updated;
+                
+                deepResultContainer.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html> 

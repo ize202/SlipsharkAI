@@ -3,12 +3,15 @@ from app.config import *
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 import os
 from pydantic import BaseModel
-from typing import Union
+from typing import Union, Dict, Any
 from .workflows.betting_chain import BettingResearchChain
 from .models.betting_models import QuickResearchResult, DeepResearchResult
+from .utils.cache import clear_cache, get_cache_stats
 import logging
 
 # Load environment variables
@@ -40,6 +43,9 @@ logger = logging.getLogger(__name__)
 # Initialize the betting research chain
 betting_chain = BettingResearchChain()
 
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 class QueryRequest(BaseModel):
     query: str
     force_deep_research: bool = False
@@ -48,9 +54,13 @@ class ExtendResearchRequest(BaseModel):
     original_query: str
     quick_result: QuickResearchResult
 
+class CacheRequest(BaseModel):
+    pattern: str = "*"
+
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Sports Research AI API"}
+    """Serve the main frontend page"""
+    return FileResponse("app/static/index.html")
 
 @app.get("/health")
 async def health_check():
@@ -84,4 +94,28 @@ async def extend_research(request: ExtendResearchRequest):
         return result
     except Exception as e:
         logger.error(f"Error extending research: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/cache/stats")
+async def cache_stats():
+    """
+    Get cache statistics
+    """
+    try:
+        stats = get_cache_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/cache/clear")
+async def clear_cache_endpoint(request: CacheRequest):
+    """
+    Clear cache entries matching the given pattern
+    """
+    try:
+        clear_cache(request.pattern)
+        return {"status": "success", "message": f"Cache cleared with pattern: {request.pattern}"}
+    except Exception as e:
+        logger.error(f"Error clearing cache: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) 

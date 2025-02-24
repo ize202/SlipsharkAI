@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
 from langfuse.decorators import observe
 from app.models.betting_models import BetHistory, UserStats, UserPreferences
+from ..utils.cache import redis_cache, memory_cache
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ class SupabaseService:
         
         self.client = create_client(self.url, self.key)
     
+    # Cache bet history for 15 minutes
+    @redis_cache(ttl=900, prefix="supabase_bet_history")
     @observe(name="supabase_get_bet_history")
     async def get_bet_history(self, user_id: str, days_back: int = 30) -> List[BetHistory]:
         """Get betting history for a user within the specified time range"""
@@ -38,6 +41,8 @@ class SupabaseService:
             logger.error(f"Error fetching bet history: {str(e)}")
             raise Exception(f"Error fetching bet history: {str(e)}")
     
+    # Cache user preferences for 1 hour
+    @redis_cache(ttl=3600, prefix="supabase_user_prefs")
     @observe(name="supabase_get_user_preferences")
     async def get_user_preferences(self, user_id: str) -> UserPreferences:
         """Get user betting preferences"""
@@ -56,6 +61,8 @@ class SupabaseService:
             logger.error(f"Error fetching user preferences: {str(e)}")
             raise Exception(f"Error fetching user preferences: {str(e)}")
     
+    # Cache user stats for 30 minutes
+    @redis_cache(ttl=1800, prefix="supabase_user_stats")
     @observe(name="supabase_get_user_stats")
     async def get_user_stats(self, user_id: str) -> List[UserStats]:
         """Get user betting statistics"""
@@ -65,12 +72,14 @@ class SupabaseService:
                 .eq("user_id", user_id) \
                 .execute()
             
-            return [UserStats(**stats) for stats in response.data]
+            return [UserStats(**stat) for stat in response.data]
                 
         except Exception as e:
             logger.error(f"Error fetching user stats: {str(e)}")
             raise Exception(f"Error fetching user stats: {str(e)}")
-
+    
+    # Cache user bets for 15 minutes
+    @redis_cache(ttl=900, prefix="supabase_user_bets")
     @observe(name="supabase_get_user_bets")
     async def get_user_bets(
         self,
@@ -78,24 +87,24 @@ class SupabaseService:
         sport: str = "basketball",
         days_back: int = 30
     ) -> List[BetHistory]:
-        """Get user's betting history for a specific sport"""
+        """Get user bets for a specific sport"""
         try:
-            # Calculate the date range
-            start_date = datetime.now() - timedelta(days=days_back)
-            
-            # Query bet_details table
-            response = await self.client.table("bet_details").select("*")\
-                .eq("sport", sport)\
-                .gte("created_at", start_date.isoformat())\
+            cutoff_date = datetime.now(UTC) - timedelta(days=days_back)
+            response = await self.client.table("bet_details") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .eq("sport", sport) \
+                .gte("placed_at", cutoff_date.isoformat()) \
                 .execute()
             
-            # Convert response to BetHistory objects
             return [BetHistory(**bet) for bet in response.data]
-            
+                
         except Exception as e:
-            logger.error(f"Error getting user bets: {str(e)}", exc_info=True)
-            raise Exception(f"Error getting user bets: {str(e)}")
+            logger.error(f"Error fetching user bets: {str(e)}")
+            raise Exception(f"Error fetching user bets: {str(e)}")
     
+    # Cache similar bets for 1 hour
+    @redis_cache(ttl=3600, prefix="supabase_similar_bets")
     @observe(name="supabase_get_similar_bets")
     async def get_similar_bets(
         self,
@@ -105,7 +114,7 @@ class SupabaseService:
         min_odds: Optional[float] = None,
         max_odds: Optional[float] = None
     ) -> List[BetHistory]:
-        """Get similar bets from all users for analysis"""
+        """Get similar bets across all users"""
         try:
             # Calculate the date range
             start_date = datetime.now() - timedelta(days=days_back)

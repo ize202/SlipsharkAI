@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
 from ..models.betting_models import QueryAnalysis, SportType, Citation
+from ..utils.cache import redis_cache, memory_cache
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -49,6 +50,9 @@ class PerplexityService:
         """Async context manager exit"""
         await self.client.aclose()
     
+    # Use Redis cache with a 30-minute TTL for quick research
+    # This is appropriate for sports betting where data changes frequently
+    @redis_cache(ttl=1800, prefix="perplexity", serialize_json=True)
     @observe(name="perplexity_quick_research")
     async def quick_research(
         self,

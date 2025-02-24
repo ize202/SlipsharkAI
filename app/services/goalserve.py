@@ -10,6 +10,7 @@ import json
 import asyncio
 import xml.etree.ElementTree as ET
 from io import StringIO
+from ..utils.cache import redis_cache, memory_cache
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -183,6 +184,8 @@ class GoalserveNBAService:
             logger.error(f"XML content: {xml_text[:500]}")
             raise ValueError("Failed to parse XML response")
 
+    # Cache the request for 5 minutes - this is a low-level method used by other methods
+    @redis_cache(ttl=300, prefix="goalserve_request")
     @observe(name="goalserve_make_request")
     async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make a request to the Goalserve API"""
@@ -254,6 +257,8 @@ class GoalserveNBAService:
                 logger.error(f"Response content: {e.response.text[:500]}")
             raise
     
+    # Cache team IDs for 24 hours since they rarely change
+    @redis_cache(ttl=86400, prefix="goalserve_team_id")
     def get_team_id(self, team_name: str) -> str:
         """Get the Goalserve team ID for a given team name"""
         logger.debug(f"Looking up team ID for: '{team_name}'")
@@ -265,6 +270,8 @@ class GoalserveNBAService:
         logger.info(f"Found team ID '{team_id}' for team '{team_name}'")
         return team_id
     
+    # Cache upcoming games for 30 minutes
+    @redis_cache(ttl=1800, prefix="goalserve_upcoming")
     @observe(name="goalserve_get_upcoming_games")
     async def get_upcoming_games(self, team_name: str) -> List[NBASchedule]:
         """Get upcoming games for a specific team."""
@@ -286,6 +293,8 @@ class GoalserveNBAService:
                 ))
         return games
     
+    # Cache team stats for 1 hour
+    @redis_cache(ttl=3600, prefix="goalserve_team_stats")
     @observe(name="goalserve_get_team_stats")
     async def get_team_stats(self, team_name_or_id: str) -> Dict[str, Any]:
         """Get team stats from Goalserve API.
@@ -413,6 +422,8 @@ class GoalserveNBAService:
             logger.error(f"Error getting team stats for team {team_id}: {str(e)}")
             raise ValueError(f"Error getting team stats for team {team_id}") from e
     
+    # Cache player stats for 1 hour
+    @redis_cache(ttl=3600, prefix="goalserve_player_stats")
     @observe(name="goalserve_get_player_stats")
     async def get_player_stats(self, team_name_or_id: str) -> List[NBAPlayerStats]:
         """Get current season statistics for all players on an NBA team
@@ -486,6 +497,8 @@ class GoalserveNBAService:
             logger.error(f"Error getting player stats: {str(e)}")
             raise ValueError(f"Error getting player stats for team {team_id}") from e
     
+    # Cache head-to-head data for 6 hours
+    @redis_cache(ttl=21600, prefix="goalserve_h2h")
     @observe(name="goalserve_get_head_to_head")
     async def get_head_to_head(self, team1_id: str, team2_id: str) -> NBAHeadToHead:
         """Get head-to-head comparison between two teams"""
@@ -505,6 +518,8 @@ class GoalserveNBAService:
             logger.error(f"Error getting head to head comparison: {str(e)}")
             raise
     
+    # Cache standings for 1 hour
+    @redis_cache(ttl=3600, prefix="goalserve_standings")
     @observe(name="goalserve_get_standings")
     async def get_standings(self) -> List[NBAStandings]:
         """Get current NBA standings"""
@@ -529,6 +544,8 @@ class GoalserveNBAService:
             logger.error(f"Error getting standings: {str(e)}")
             raise
     
+    # Cache live scores for only 1 minute since they change frequently
+    @redis_cache(ttl=60, prefix="goalserve_live")
     @observe(name="goalserve_get_live_scores")
     async def get_live_scores(self) -> List[NBALiveScore]:
         """Get live NBA game scores"""
@@ -554,6 +571,8 @@ class GoalserveNBAService:
             logger.error(f"Error getting live scores: {str(e)}")
             raise
     
+    # Cache injuries for 2 hours
+    @redis_cache(ttl=7200, prefix="goalserve_injuries")
     @observe(name="goalserve_get_injuries")
     async def get_injuries(self, team_name: str) -> List[NBAInjuryReport]:
         """Get injury reports for a team"""
