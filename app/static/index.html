@@ -266,7 +266,7 @@
                 }
                 
                 const data = await response.json();
-                const conversationalResponse = response.headers.get('X-Conversational-Response');
+                const conversationalResponse = data.conversational_response;
                 
                 return {
                     data,

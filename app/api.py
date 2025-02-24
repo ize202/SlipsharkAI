@@ -80,14 +80,11 @@ async def analyze_betting_query(request: QueryRequest):
         # Extract the conversational response if it exists
         conversational_response = result.pop("conversational_response", None)
         
-        # Add it as a header in the response
+        # Include it in the response body instead of headers
         response = result
         if conversational_response:
-            # Create a FastAPI response with headers
-            return JSONResponse(
-                content=response,
-                headers={"X-Conversational-Response": conversational_response}
-            )
+            # Add it to the response content
+            response["conversational_response"] = conversational_response
         
         return response
     except Exception as e:
@@ -108,14 +105,11 @@ async def extend_research(request: ExtendResearchRequest):
         # Extract the conversational response if it exists
         conversational_response = result.pop("conversational_response", None)
         
-        # Add it as a header in the response
+        # Include it in the response body instead of headers
         response = result
         if conversational_response:
-            # Create a FastAPI response with headers
-            return JSONResponse(
-                content=response,
-                headers={"X-Conversational-Response": conversational_response}
-            )
+            # Add it to the response content
+            response["conversational_response"] = conversational_response
         
         return response
     except Exception as e:

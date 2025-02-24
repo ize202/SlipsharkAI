@@ -166,6 +166,10 @@ async def quick_research(query: QueryAnalysis) -> QuickResearchResult:
         - Recent performance metrics
         - Key injuries or roster changes
         - Relevant news that could impact betting
+        
+        IMPORTANT: Only include specific odds, lines, and statistics if you can find them in reliable sources.
+        If you cannot find specific data, clearly state what information is unavailable.
+        DO NOT make up or hallucinate specific odds, lines, or statistics.
         """
         
         async with PerplexityService() as perplexity:
@@ -370,9 +374,9 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
                     ],
                     "recommended_bet": "Recommended betting action based on analysis",
                     "odds_analysis": {
-                        "current_line": -5.5,
-                        "line_movement": "stable",
-                        "market_sentiment": "balanced"
+                        "current_line": null,  // Use actual odds data if available, otherwise null
+                        "line_movement": "unknown",  // Use actual data: "up", "down", "stable", or "unknown"
+                        "market_sentiment": "unknown"  // Use actual data: "favoring_over", "favoring_under", "balanced", or "unknown"
                     },
                     "historical_context": "Relevant historical betting patterns and trends",
                     "confidence_score": 0.75,  // Float between 0 and 1
@@ -381,17 +385,24 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
                             "url": "https://example.com/source",
                             "title": "Source Title",
                             "snippet": "Relevant excerpt",
-                            "published_date": "2024-02-23T00:00:00Z"
+                            "published_date": null  // Use actual date if available
                         }
                     ],
-                    "last_updated": "2024-02-23T12:34:56Z"
+                    "last_updated": null  // Will be set to current time
                 }
                 
                 DO NOT wrap the JSON in markdown code blocks or any other formatting.
                 DO NOT include any explanatory text before or after the JSON.
                 The JSON should start with { and end with } with no other characters.
                 ENSURE all required fields are present and properly formatted.
-                For risk_factors, severity MUST be one of: "low", "medium", "high" as a string."""
+                For risk_factors, severity MUST be one of: "low", "medium", or "high" as a string.
+                
+                CRITICAL: DO NOT HALLUCINATE DATA. If specific data (like odds, lines, or statistics) is not available in the provided context:
+                1. Use null for numeric values
+                2. Use "unknown" or "unavailable" for string values
+                3. Clearly indicate in insights when information is limited or unavailable
+                4. Reduce confidence scores appropriately when working with limited data
+                5. NEVER invent specific odds, lines, or statistics."""
             },
             {"role": "user", "content": context}
         ]
@@ -416,7 +427,15 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
         cleaned_json = cleaned_json.strip()
         
         try:
-            return DeepResearchResult.model_validate_json(cleaned_json)
+            # Parse the JSON into a dictionary first
+            result_dict = json.loads(cleaned_json)
+            
+            # Ensure last_updated is a string
+            if result_dict.get("last_updated") is None:
+                result_dict["last_updated"] = datetime.now(UTC).isoformat()
+                
+            # Convert back to JSON and validate
+            return DeepResearchResult.model_validate(result_dict)
         except Exception as e:
             logger.error(f"Error parsing JSON response: {cleaned_json}")
             logger.error(f"Validation error: {str(e)}")
@@ -428,11 +447,69 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
 
 def create_analysis_context(query: QueryAnalysis, data_points: List[DataPoint]) -> str:
     """Create a structured context for the LLM to analyze"""
-    context = {
-        "query": query.model_dump(),
-        "data": {dp.source: dp.content for dp in data_points}
+    # Organize data by category for easier analysis
+    organized_data = {
+        "query_info": query.model_dump(),
+        "odds_data": {},
+        "team_stats": {},
+        "player_stats": {},
+        "injuries": {},
+        "news": {},
+        "historical_data": {},
+        "user_data": {}
     }
-    return str(context)  # Convert to string for LLM input
+    
+    # Categorize data points
+    for dp in data_points:
+        source = dp.source
+        content = dp.content
+        
+        # Categorize based on source name patterns
+        if "odds" in source.lower():
+            organized_data["odds_data"][source] = content
+        elif "team_stats" in source.lower():
+            organized_data["team_stats"][source] = content
+        elif "player_stats" in source.lower() or "stats" in source.lower():
+            organized_data["player_stats"][source] = content
+        elif "injuries" in source.lower():
+            organized_data["injuries"][source] = content
+        elif "news" in source.lower() or "perplexity" in source.lower():
+            organized_data["news"][source] = content
+        elif "history" in source.lower() or "historical" in source.lower():
+            organized_data["historical_data"][source] = content
+        elif "user" in source.lower() or "bets" in source.lower():
+            organized_data["user_data"][source] = content
+        else:
+            # If it doesn't fit a category, put it in the appropriate one based on content inspection
+            # or create a new category
+            if not organized_data.get("other_data"):
+                organized_data["other_data"] = {}
+            organized_data["other_data"][source] = content
+    
+    # Add data availability flags to help the model know what's available
+    data_availability = {
+        "has_odds_data": len(organized_data["odds_data"]) > 0,
+        "has_team_stats": len(organized_data["team_stats"]) > 0,
+        "has_player_stats": len(organized_data["player_stats"]) > 0,
+        "has_injuries_data": len(organized_data["injuries"]) > 0,
+        "has_news_data": len(organized_data["news"]) > 0,
+        "has_historical_data": len(organized_data["historical_data"]) > 0,
+        "has_user_data": len(organized_data["user_data"]) > 0
+    }
+    
+    organized_data["data_availability"] = data_availability
+    
+    # Add instructions about data limitations
+    organized_data["instructions"] = """
+    IMPORTANT INSTRUCTIONS:
+    1. Only use the data provided in this context for your analysis.
+    2. If specific data (like current odds or lines) is not available, use null values and clearly state the limitation.
+    3. Do not hallucinate or invent specific odds, statistics, or other numerical values.
+    4. Reduce confidence scores when working with limited data.
+    5. Be transparent about what information is and isn't available.
+    """
+    
+    return str(organized_data)  # Convert to string for LLM input
 
 @observe(name="generate_final_response")
 async def generate_final_response(
@@ -467,6 +544,13 @@ async def generate_final_response(
         6. Acknowledge uncertainties and risks
         7. End with a clear recommendation
         
+        CRITICAL DATA INTEGRITY RULES:
+        1. NEVER invent or hallucinate specific odds, lines, statistics, or other numerical values
+        2. If the research results indicate missing or unavailable data, acknowledge this limitation clearly
+        3. Use phrases like "odds data isn't available" or "we don't have current line information" when appropriate
+        4. Be transparent about confidence levels - lower confidence when data is limited
+        5. Focus on what IS known rather than making up what isn't
+        
         The user's original query and the structured research results will be provided.
         Your response should feel like advice from a knowledgeable friend rather than a data dump.
         """
@@ -484,7 +568,7 @@ async def generate_final_response(
         """
         
         # Make the OpenAI API call
-        response = await openai.chat.completions.create(
+        response = openai.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
