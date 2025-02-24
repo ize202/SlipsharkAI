@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 from langfuse.decorators import observe
 import json
 import asyncio
+import xml.etree.ElementTree as ET
+from io import StringIO
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -114,16 +116,6 @@ class NBAInjuryReport(BaseModel):
 class GoalserveNBAService:
     """Service for interacting with Goalserve NBA API"""
     
-    # NBA team IDs mapping (you should load this from a config or database)
-    TEAM_IDS = {
-        "Lakers": "1066",
-        "Warriors": "1067",
-        "Celtics": "1068",
-        "Bulls": "1069",
-        "Heat": "1070",
-        # Add more teams...
-    }
-    
     def __init__(self):
         """Initialize the Goalserve NBA service with API key and configuration"""
         self.api_key = os.getenv("GOALSERVE_API_KEY")
@@ -133,6 +125,7 @@ class GoalserveNBAService:
         self.base_url = "https://www.goalserve.com/getfeed"
         self.api_key_path = self.api_key  # The API key is included in the URL path
         self.client = None
+        self._team_ids = {}  # Cache for team IDs
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -140,6 +133,8 @@ class GoalserveNBAService:
             timeout=30.0,  # 30 second timeout
             headers={"Accept-Encoding": "gzip"}
         )
+        # Load team IDs when entering context
+        await self._load_team_ids()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -150,15 +145,54 @@ class GoalserveNBAService:
     
     def _build_url(self, endpoint: str) -> str:
         """Build the full URL for a Goalserve API endpoint"""
-        return f"{self.base_url}/{self.api_key_path}/bsktbl/{endpoint}?json=1"
+        # Make sure json=1 is the first parameter if there are other parameters in the endpoint
+        if '?' in endpoint:
+            endpoint = endpoint.replace('?', '?json=1&')
+        else:
+            endpoint = f"{endpoint}?json=1"
+        return f"{self.base_url}/{self.api_key_path}/bsktbl/{endpoint}"
     
-    def get_team_id(self, team_name: str) -> str:
-        """Get the Goalserve team ID for a given team name"""
-        team_id = self.TEAM_IDS.get(team_name)
-        if not team_id:
-            raise ValueError(f"Unknown team name: {team_name}")
-        return team_id
-    
+    def _parse_xml_response(self, xml_text: str) -> Dict[str, Any]:
+        """Parse XML response into a dictionary"""
+        try:
+            root = ET.fromstring(xml_text)
+            result = {}
+            
+            def parse_element(element, parent_dict):
+                """Recursively parse XML elements"""
+                if len(element) == 0:  # No children
+                    # Get all attributes
+                    attrs = element.attrib
+                    if attrs:
+                        parent_dict[element.tag] = attrs
+                    else:
+                        parent_dict[element.tag] = element.text
+                else:
+                    # Has children
+                    if element.tag not in parent_dict:
+                        parent_dict[element.tag] = {}
+                    
+                    # If there are multiple children with the same tag, make it a list
+                    child_tags = [child.tag for child in element]
+                    for tag in set(child_tags):
+                        if child_tags.count(tag) > 1:
+                            parent_dict[element.tag][tag] = []
+                            for child in element.findall(tag):
+                                child_dict = {}
+                                parse_element(child, child_dict)
+                                parent_dict[element.tag][tag].append(child_dict.get(tag, {}))
+                        else:
+                            for child in element.findall(tag):
+                                parse_element(child, parent_dict[element.tag])
+            
+            parse_element(root, result)
+            return result
+            
+        except ET.ParseError as e:
+            logger.error(f"Failed to parse XML: {str(e)}")
+            logger.error(f"XML content: {xml_text[:500]}")
+            raise ValueError("Failed to parse XML response")
+
     @observe(name="goalserve_make_request")
     async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make a request to the Goalserve API"""
@@ -168,12 +202,26 @@ class GoalserveNBAService:
         try:
             url = self._build_url(endpoint)
             params = params or {}
-            params["key"] = self.api_key
+            # Remove duplicate API key if present
+            params.pop("key", None)
+            # Ensure json=1 is in params
+            params["json"] = "1"
+            
+            logger.info(f"Making request to endpoint: {endpoint}")
+            logger.debug(f"Full URL: {url}")
+            logger.debug(f"Params: {params}")
 
             # Add retries for 500 errors
             for attempt in range(3):
                 try:
                     response = await self.client.get(url, params=params)
+                    logger.debug(f"Response status: {response.status_code}")
+                    logger.debug(f"Response headers: {dict(response.headers)}")
+                    
+                    # Log the first 500 characters of the response for debugging
+                    content_preview = response.text[:500] if response.text else "Empty response"
+                    logger.debug(f"Response preview: {content_preview}")
+                    
                     response.raise_for_status()
                     break
                 except httpx.HTTPStatusError as e:
@@ -181,35 +229,53 @@ class GoalserveNBAService:
                         logger.warning(f"Attempt {attempt + 1}: Got 500 error, retrying...")
                         await asyncio.sleep(1)  # Wait 1 second before retry
                         continue
+                    logger.error(f"HTTP error {e.response.status_code} for {endpoint}")
+                    logger.error(f"Response content: {e.response.text[:500]}")
                     raise
-            
-            # Handle gzipped content
-            if response.headers.get("content-encoding") == "gzip":
-                try:
-                    content = gzip.decompress(response.content)
-                    return json.loads(content)
-                except (gzip.BadGzipFile, json.JSONDecodeError) as e:
-                    logger.error(f"Failed to process gzipped content: {str(e)}")
-                    raise ValueError("Failed to process response content")
-            
-            # Regular JSON response
+
+            # Try to parse the response content
             try:
+                # First try direct JSON parsing
                 return response.json()
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON response: {str(e)}")
-                logger.error(f"Response content: {response.text[:200]}...")
-                raise ValueError("Invalid JSON response from API")
+            except json.JSONDecodeError:
+                # If that fails, check if it's gzipped
+                if response.headers.get("content-encoding") == "gzip":
+                    try:
+                        decompressed_content = gzip.decompress(response.content)
+                        return json.loads(decompressed_content)
+                    except (gzip.BadGzipFile, json.JSONDecodeError) as e:
+                        logger.error(f"Failed to process gzipped content: {str(e)}")
+                        logger.error(f"Content preview: {response.content[:500] if response.content else 'Empty content'}")
+                        raise ValueError("Failed to process gzipped response content")
+                else:
+                    # If we got XML, try to parse it
+                    if response.text.strip().startswith('<?xml'):
+                        logger.info("Received XML response, attempting to parse")
+                        return self._parse_xml_response(response.text)
+                    else:
+                        logger.error("Response is not valid JSON, XML, or gzipped")
+                        logger.error(f"Response content type: {response.headers.get('content-type')}")
+                        logger.error(f"Response content preview: {response.text[:500]}")
+                        raise ValueError("Invalid response format from API")
 
         except Exception as e:
-            logger.error(f"Error in API request: {str(e)}")
+            logger.error(f"Error in API request to {endpoint}: {str(e)}")
             if isinstance(e, httpx.HTTPStatusError):
-                logger.error(f"Response content: {e.response.text[:200]}...")
+                logger.error(f"Response content: {e.response.text[:500]}")
             raise
+    
+    def get_team_id(self, team_name: str) -> str:
+        """Get the Goalserve team ID for a given team name"""
+        team_id = self._team_ids.get(team_name)
+        if not team_id:
+            raise ValueError(f"Unknown team name: {team_name}")
+        return team_id
     
     @observe(name="goalserve_get_upcoming_games")
     async def get_upcoming_games(self, team_name: str) -> List[NBASchedule]:
         """Get upcoming games schedule for an NBA team"""
         try:
+            # Note: The endpoint is "nba-schedule" not "nba-shedule" (fixed typo)
             data = await self._make_request("nba-schedule")
             games = []
             for match in data.get("matches", []):
@@ -233,61 +299,120 @@ class GoalserveNBAService:
             raise
     
     @observe(name="goalserve_get_team_stats")
-    async def get_team_stats(self, team_name: str) -> NBATeamStats:
-        """Get current season statistics for an NBA team"""
+    async def get_team_stats(self, team_id: str) -> Dict[str, Any]:
+        """Get team stats from Goalserve API."""
         try:
-            team_id = self.get_team_id(team_name)
-            data = await self._make_request(f"{team_id}_team_stats")
-            team_data = data.get("statistic", {}).get("team", {})
-            stats = team_data.get("stats", {})
-            return NBATeamStats(
-                team_id=team_id,
-                name=team_data.get("name", ""),
-                wins=int(stats.get("wins", "0")),
-                losses=int(stats.get("losses", "0")),
-                win_percentage=float(stats.get("win_percentage", "0.0")),
-                points_per_game=float(stats.get("points_per_game", "0.0")),
-                points_allowed=float(stats.get("points_allowed", "0.0")),
-                last_ten=stats.get("last_ten", "0-0"),
-                streak=stats.get("streak", ""),
-                home_record=stats.get("home_record", "0-0"),
-                away_record=stats.get("away_record", "0-0"),
-                conference_rank=int(stats.get("conference_rank", "0"))
-            )
-                
+            # Use the correct endpoint format: team_id_team_stats
+            response = await self._make_request(f"{team_id}_team_stats")
+            
+            if not isinstance(response, dict) or "statistic" not in response:
+                raise ValueError(f"Invalid response format: {response}")
+
+            stats = response["statistic"]
+            if not isinstance(stats, dict) or "category" not in stats:
+                raise ValueError(f"Invalid stats format: {stats}")
+
+            categories = stats["category"]
+            if not isinstance(categories, list):
+                categories = [categories]  # Handle single category case
+
+            # Initialize stats dictionary
+            team_stats = {
+                "games_played": 0,
+                "points_per_game": 0,
+                "rebounds_per_game": 0,
+                "assists_per_game": 0,
+                "field_goal_percentage": 0,
+                "three_point_percentage": 0
+            }
+
+            # Process each category
+            for category in categories:
+                if not isinstance(category, dict) or "name" not in category:
+                    continue
+
+                # Get team stats from the team section
+                team_data = category.get("team", {})
+                if not team_data:
+                    continue
+
+                if category["name"] == "Game":
+                    team_stats["games_played"] = float(team_data.get("games_played", 0))
+                    team_stats["rebounds_per_game"] = float(team_data.get("rebounds_per_game", 0))
+                    team_stats["assists_per_game"] = float(team_data.get("assists_per_game", 0))
+                    team_stats["points_per_game"] = float(team_data.get("points_per_game", 0))
+
+                elif category["name"] == "Shooting":
+                    team_stats["field_goal_percentage"] = float(team_data.get("fg_pct", 0))
+                    team_stats["three_point_percentage"] = float(team_data.get("three_point_pct", 0))
+
+            return team_stats
+
         except Exception as e:
-            logger.error(f"Error getting team stats: {str(e)}")
-            raise
+            logger.error(f"Invalid team stats data structure: {e}")
+            raise ValueError(f"Invalid team stats data structure for team {team_id}") from e
     
     @observe(name="goalserve_get_player_stats")
-    async def get_player_stats(self, team_name: str) -> List[NBAPlayerStats]:
+    async def get_player_stats(self, team_id: str) -> List[NBAPlayerStats]:
         """Get current season statistics for all players on an NBA team"""
         try:
-            team_id = self.get_team_id(team_name)
-            data = await self._make_request(f"{team_id}_team_stats")
-            players = []
-            for player in data.get("statistic", {}).get("team", {}).get("players", []):
-                players.append(NBAPlayerStats(
-                    player_id=player.get("id", ""),
-                    name=player.get("name", ""),
-                    position=player.get("position", ""),
-                    status=player.get("status", "Active"),
-                    points_per_game=float(player.get("points_per_game", "0.0")),
-                    rebounds_per_game=float(player.get("rebounds_per_game", "0.0")),
-                    assists_per_game=float(player.get("assists_per_game", "0.0")),
-                    minutes_per_game=float(player.get("minutes_per_game", "0.0"))
-                ))
-            return players
-                
+            # Use the correct endpoint format: team_id_stats
+            response = await self._make_request(f"{team_id}_stats")
+            logger.debug(f"Player stats response: {json.dumps(response, indent=2)[:1000]}")
+
+            if not isinstance(response, dict) or "statistic" not in response:
+                raise ValueError(f"Invalid response format: {response}")
+
+            stats = response["statistic"]
+            if not isinstance(stats, dict) or "category" not in stats:
+                raise ValueError(f"Invalid stats format: {stats}")
+
+            categories = stats["category"]
+            if not isinstance(categories, list):
+                categories = [categories]  # Handle single category case
+
+            player_stats_list = []
+            
+            # Process each category
+            for category in categories:
+                if not isinstance(category, dict) or "name" not in category:
+                    continue
+
+                if category["name"] == "Game":
+                    players = category.get("player", [])
+                    if not isinstance(players, list):
+                        players = [players]  # Handle single player case
+
+                    for player in players:
+                        try:
+                            player_stats = NBAPlayerStats(
+                                player_id=player.get("id", ""),
+                                name=player.get("name", ""),
+                                position=player.get("position", ""),
+                                status=player.get("status", "Active"),
+                                points_per_game=float(player.get("points_per_game", 0)),
+                                rebounds_per_game=float(player.get("rebounds_per_game", 0)),
+                                assists_per_game=float(player.get("assists_per_game", 0)),
+                                minutes_per_game=float(player.get("minutes", 0)),
+                                injury_status=player.get("injury_status"),
+                                injury_details=player.get("injury_details")
+                            )
+                            player_stats_list.append(player_stats)
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Error parsing stats for player {player.get('name', 'unknown')}: {str(e)}")
+                            continue
+
+            return player_stats_list
+
         except Exception as e:
             logger.error(f"Error getting player stats: {str(e)}")
-            raise
+            raise ValueError(f"Error getting player stats for team {team_id}") from e
     
     @observe(name="goalserve_get_game_odds")
     async def get_odds_comparison(self, date1: Optional[str] = None, date2: Optional[str] = None) -> List[NBAGameOdds]:
         """Get odds comparison from various bookmakers for a date range"""
         try:
-            endpoint = "nba-schedule"
+            endpoint = "nba-schedule"  # Fixed from nba-shedule
             params = {"showodds": "1"}
             if date1:
                 params["date1"] = date1
@@ -404,4 +529,77 @@ class GoalserveNBAService:
                 
         except Exception as e:
             logger.error(f"Error getting injury reports: {str(e)}")
-            raise 
+            raise
+    
+    async def _load_team_ids(self):
+        """Load team IDs from standings data"""
+        try:
+            # Get the standings data
+            data = await self._make_request("nba-standings")
+            logger.info("Fetching standings data for team ID mapping")
+            
+            if not isinstance(data, dict):
+                raise ValueError(f"Invalid standings data format: expected dict, got {type(data)}")
+            
+            # Initialize team mappings
+            self._team_ids = {}
+            
+            # Handle both XML and JSON response formats
+            if "standings" in data:
+                # JSON format
+                standings = data["standings"]
+                if isinstance(standings, dict):
+                    # Conference-based structure
+                    for conference, teams in standings.items():
+                        if isinstance(teams, list):
+                            for team in teams:
+                                if isinstance(team, dict):
+                                    name = team.get("name", "")
+                                    team_id = team.get("id", "")
+                                    if name and team_id:
+                                        # Clean up team name
+                                        if name.startswith("USA: NBA "):
+                                            name = name[9:]
+                                        self._team_ids[name] = team_id
+                                        logger.debug(f"Added team mapping: {name} -> {team_id}")
+                elif isinstance(standings, dict) and "category" in standings:
+                    # XML-converted format
+                    category = standings["category"]
+                    leagues = category.get("league", [])
+                    if not isinstance(leagues, list):
+                        leagues = [leagues]
+                    
+                    for league in leagues:
+                        divisions = league.get("division", [])
+                        if not isinstance(divisions, list):
+                            divisions = [divisions]
+                        
+                        for division in divisions:
+                            teams = division.get("team", [])
+                            if not isinstance(teams, list):
+                                teams = [teams]
+                            
+                            for team in teams:
+                                if isinstance(team, dict):
+                                    name = team.get("name", "")
+                                    team_id = team.get("id", "")
+                                    if name and team_id:
+                                        # Clean up team name
+                                        if name.startswith("USA: NBA "):
+                                            name = name[9:]
+                                        self._team_ids[name] = team_id
+                                        logger.debug(f"Added team mapping: {name} -> {team_id}")
+            
+            if not self._team_ids:
+                logger.error("No team IDs were loaded from the standings data")
+                logger.error(f"Raw data structure: {json.dumps(data, indent=2)[:1000]}")
+                raise ValueError("No team IDs were loaded from the standings data")
+            
+            logger.info(f"Successfully loaded {len(self._team_ids)} team IDs")
+            logger.debug(f"Team mappings: {self._team_ids}")
+            
+        except Exception as e:
+            logger.error(f"Error loading team IDs: {str(e)}")
+            logger.error("Team ID loading failed. Some methods may not work correctly.")
+            self._team_ids = {}  # Reset to empty dict on failure
+            # Don't raise here, let the specific methods handle missing team IDs 
