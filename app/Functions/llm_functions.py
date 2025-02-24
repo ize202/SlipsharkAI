@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 import logging
 from datetime import datetime, UTC
 import asyncio
+import re
 from langfuse.decorators import observe
 from langfuse import Langfuse
 import openai
@@ -31,6 +32,60 @@ logger = logging.getLogger(__name__)
 
 # Using the latest model for best performance
 model = "gpt-4o-mini"
+
+# NBA team names and their variations
+NBA_TEAMS = {
+    "nuggets": ["denver", "denver nuggets", "nuggets"],
+    "pacers": ["indiana", "indiana pacers", "pacers"],
+    "heat": ["miami", "miami heat", "heat"],
+    "hawks": ["atlanta", "atlanta hawks", "hawks"],
+    "nets": ["brooklyn", "brooklyn nets", "nets"],
+    "wizards": ["washington", "washington wizards", "wizards"],
+    "clippers": ["la clippers", "los angeles clippers", "clippers"],
+    "pistons": ["detroit", "detroit pistons", "pistons"],
+    "hornets": ["charlotte", "charlotte hornets", "hornets"],
+    "kings": ["sacramento", "sacramento kings", "kings"],
+    "trail blazers": ["portland", "portland trail blazers", "blazers", "trail blazers"],
+    "jazz": ["utah", "utah jazz", "jazz"],
+    "timberwolves": ["minnesota", "minnesota timberwolves", "wolves", "timberwolves"],
+    "thunder": ["oklahoma city", "oklahoma city thunder", "thunder"],
+    "bulls": ["chicago", "chicago bulls", "bulls"],
+    "76ers": ["philadelphia", "philadelphia 76ers", "sixers", "76ers"],
+    "warriors": ["golden state", "golden state warriors", "warriors"],
+    "lakers": ["la lakers", "los angeles lakers", "lakers"],
+    "celtics": ["boston", "boston celtics", "celtics"],
+    "knicks": ["new york", "new york knicks", "knicks"],
+    "raptors": ["toronto", "toronto raptors", "raptors"],
+    "cavaliers": ["cleveland", "cleveland cavaliers", "cavs", "cavaliers"],
+    "mavericks": ["dallas", "dallas mavericks", "mavs", "mavericks"],
+    "rockets": ["houston", "houston rockets", "rockets"],
+    "spurs": ["san antonio", "san antonio spurs", "spurs"],
+    "suns": ["phoenix", "phoenix suns", "suns"],
+    "grizzlies": ["memphis", "memphis grizzlies", "grizzlies"],
+    "bucks": ["milwaukee", "milwaukee bucks", "bucks"],
+    "pelicans": ["new orleans", "new orleans pelicans", "pelicans"],
+    "magic": ["orlando", "orlando magic", "magic"]
+}
+
+def extract_team_name(query: str) -> Optional[str]:
+    """
+    Extract NBA team name from a query string.
+    
+    Args:
+        query: The query string to extract team names from
+        
+    Returns:
+        The first team name found in the query, or None if no team is found
+    """
+    query_lower = query.lower()
+    
+    # Try to find any team name or variation in the query
+    for team, variations in NBA_TEAMS.items():
+        for variation in variations:
+            if variation in query_lower:
+                return team
+    
+    return None
 
 @observe(name="analyze_query")
 async def analyze_query(user_input: str) -> QueryAnalysis:
@@ -321,21 +376,6 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
     except Exception as e:
         logger.error(f"Error in deep_research: {str(e)}", exc_info=True)
         raise
-
-def extract_team_name(query: str) -> Optional[str]:
-    """Extract NBA team name from query string"""
-    # TODO: Implement more sophisticated team name extraction
-    # For now, just look for common team names
-    nba_teams = {
-        "Lakers", "Warriors", "Celtics", "Bulls", "Heat",
-        # Add more teams...
-    }
-    
-    words = query.split()
-    for word in words:
-        if word in nba_teams:
-            return word
-    return None
 
 def create_analysis_context(query: QueryAnalysis, data_points: List[DataPoint]) -> str:
     """Create a structured context for the LLM to analyze"""

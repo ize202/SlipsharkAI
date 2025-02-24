@@ -40,8 +40,8 @@ async def test_deep_research_nba_real_integration():
     # Initialize services directly (no mocks)
     chain = BettingResearchChain()
     
-    # Test with a real NBA betting query
-    query = "Should I bet on the Lakers to cover -5.5 against the Warriors tonight? LeBron's status is questionable."
+    # Test with a real upcoming NBA game
+    query = "Should I bet on the Nuggets to cover against the Pacers on Monday? I'm particularly interested in how Jokic matches up against Turner."
     
     try:
         logger.info(f"Processing query: {query}")
@@ -57,7 +57,7 @@ async def test_deep_research_nba_real_integration():
         
         # Content validation
         content_lower = result.summary.lower()
-        assert any(word in content_lower for word in ["lakers", "warriors"]), "Summary should mention relevant teams"
+        assert any(word in content_lower for word in ["nuggets", "pacers"]), "Summary should mention relevant teams"
         
         # Validate insights
         for insight in result.insights:
