@@ -34,60 +34,6 @@ logger = logging.getLogger(__name__)
 # Using the latest model for best performance
 model = "gpt-4o-mini"
 
-# NBA team names and their variations
-NBA_TEAMS = {
-    "nuggets": ["denver", "denver nuggets", "nuggets"],
-    "pacers": ["indiana", "indiana pacers", "pacers"],
-    "heat": ["miami", "miami heat", "heat"],
-    "hawks": ["atlanta", "atlanta hawks", "hawks"],
-    "nets": ["brooklyn", "brooklyn nets", "nets"],
-    "wizards": ["washington", "washington wizards", "wizards"],
-    "clippers": ["la clippers", "los angeles clippers", "clippers"],
-    "pistons": ["detroit", "detroit pistons", "pistons"],
-    "hornets": ["charlotte", "charlotte hornets", "hornets"],
-    "kings": ["sacramento", "sacramento kings", "kings"],
-    "trail blazers": ["portland", "portland trail blazers", "blazers", "trail blazers"],
-    "jazz": ["utah", "utah jazz", "jazz"],
-    "timberwolves": ["minnesota", "minnesota timberwolves", "wolves", "timberwolves"],
-    "thunder": ["oklahoma city", "oklahoma city thunder", "thunder"],
-    "bulls": ["chicago", "chicago bulls", "bulls"],
-    "76ers": ["philadelphia", "philadelphia 76ers", "sixers", "76ers"],
-    "warriors": ["golden state", "golden state warriors", "warriors"],
-    "lakers": ["la lakers", "los angeles lakers", "lakers"],
-    "celtics": ["boston", "boston celtics", "celtics"],
-    "knicks": ["new york", "new york knicks", "knicks"],
-    "raptors": ["toronto", "toronto raptors", "raptors"],
-    "cavaliers": ["cleveland", "cleveland cavaliers", "cavs", "cavaliers"],
-    "mavericks": ["dallas", "dallas mavericks", "mavs", "mavericks"],
-    "rockets": ["houston", "houston rockets", "rockets"],
-    "spurs": ["san antonio", "san antonio spurs", "spurs"],
-    "suns": ["phoenix", "phoenix suns", "suns"],
-    "grizzlies": ["memphis", "memphis grizzlies", "grizzlies"],
-    "bucks": ["milwaukee", "milwaukee bucks", "bucks"],
-    "pelicans": ["new orleans", "new orleans pelicans", "pelicans"],
-    "magic": ["orlando", "orlando magic", "magic"]
-}
-
-def extract_team_name(query: str) -> Optional[str]:
-    """
-    Extract NBA team name from a query string.
-    
-    Args:
-        query: The query string to extract team names from
-        
-    Returns:
-        The first team name found in the query, or None if no team is found
-    """
-    query_lower = query.lower()
-    
-    # Try to find any team name or variation in the query
-    for team, variations in NBA_TEAMS.items():
-        for variation in variations:
-            if variation in query_lower:
-                return team
-    
-    return None
-
 @observe(name="analyze_query")
 async def analyze_query(user_input: str) -> QueryAnalysis:
     """Initial analysis to determine research path and extract key information"""
@@ -133,6 +79,16 @@ async def analyze_query(user_input: str) -> QueryAnalysis:
         DO NOT include any explanatory text, just the JSON object.
         Ensure all team names are complete and standardized (e.g., "Denver Nuggets" not just "Nuggets").
         Set is_deep_research to true if the query asks about specific matchups, trends, or detailed analysis.
+        
+        For NBA teams, always use the official team names:
+        - Denver Nuggets, Indiana Pacers, Miami Heat, Atlanta Hawks, Brooklyn Nets
+        - Washington Wizards, LA Clippers, Detroit Pistons, Charlotte Hornets
+        - Sacramento Kings, Portland Trail Blazers, Utah Jazz, Minnesota Timberwolves
+        - Oklahoma City Thunder, Chicago Bulls, Philadelphia 76ers, Golden State Warriors
+        - Los Angeles Lakers, Boston Celtics, New York Knicks, Toronto Raptors
+        - Cleveland Cavaliers, Dallas Mavericks, Houston Rockets, San Antonio Spurs
+        - Phoenix Suns, Memphis Grizzlies, Milwaukee Bucks, New Orleans Pelicans
+        - Orlando Magic
         """
         
         messages = [
@@ -313,11 +269,10 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
     logger.info(f"Starting deep research for {query.sport_type}")
     
     try:
-        # Extract team names from query for NBA research
-        # TODO: Implement more sophisticated team name extraction
-        team_name = extract_team_name(query.raw_query)
-        if not team_name:
-            raise ValueError("Could not extract team name from query")
+        # Get team names from the query analysis
+        teams = list(query.teams.values())
+        if not teams:
+            raise ValueError("No teams found in query analysis")
         
         # Initialize services
         perplexity = PerplexityService()
@@ -328,20 +283,28 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
         data_points = []
         async with perplexity, goalserve:
             # Define all the tasks we want to run in parallel
-            tasks = [
-                # Perplexity web search
-                perplexity.quick_research(
-                    query=f"Latest news, injuries, and betting trends for {team_name} NBA",
-                    search_recency="day"
-                ),
-                
-                # Goalserve NBA data - using all available endpoints
-                goalserve.get_team_stats(team_name),  # {team_id}_team_stats
-                goalserve.get_player_stats(team_name),  # {team_id}_stats
+            tasks = []
+            
+            # Add tasks for each team
+            for team in teams:
+                tasks.extend([
+                    # Perplexity web search for each team
+                    perplexity.quick_research(
+                        query=f"Latest news, injuries, and betting trends for {team}",
+                        search_recency="day"
+                    ),
+                    
+                    # Goalserve NBA data - using all available endpoints
+                    goalserve.get_team_stats(team),  # {team_id}_team_stats
+                    goalserve.get_player_stats(team),  # {team_id}_stats
+                    goalserve.get_injuries(team),  # {team_id}_injuries
+                ])
+            
+            # Add common tasks
+            tasks.extend([
                 goalserve.get_odds_comparison(),  # nba-schedule?showodds=1
-                goalserve.get_injuries(team_name),  # {team_id}_injuries
-                goalserve.get_upcoming_games(team_name),  # nba-schedule
-            ]
+                goalserve.get_upcoming_games(teams[0]),  # nba-schedule
+            ])
             
             # Add user history tasks if user_id is provided
             if user_id:
@@ -350,7 +313,7 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
                     supabase.get_user_stats(user_id, sport="basketball"),
                     supabase.get_similar_bets(
                         sport="basketball",
-                        bet_type=query.bet_type if hasattr(query, 'bet_type') else "any",
+                        bet_type=query.bet_type if query.bet_type else "any",
                         days_back=30
                     )
                 ])
