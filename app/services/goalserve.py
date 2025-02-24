@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, UTC
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
 import json
+import xml.etree.ElementTree as ET
+import asyncio
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -102,8 +104,26 @@ class NBALiveScore(BaseModel):
     home_team_score: int
     away_team_score: int
 
+class NBAInjuryReport(BaseModel):
+    """NBA injury report from Goalserve"""
+    player_id: str
+    player_name: str
+    status: str  # e.g., Sidelined, Questionable
+    description: Optional[str] = None
+    date: Optional[str] = None
+
 class GoalserveNBAService:
     """Service for interacting with Goalserve NBA API"""
+    
+    # NBA team IDs mapping (you should load this from a config or database)
+    TEAM_IDS = {
+        "Lakers": "1066",
+        "Warriors": "1067",
+        "Celtics": "1068",
+        "Bulls": "1069",
+        "Heat": "1070",
+        # Add more teams...
+    }
     
     def __init__(self):
         """Initialize the Goalserve NBA service with API key and configuration"""
@@ -113,43 +133,124 @@ class GoalserveNBAService:
         
         self.base_url = "https://www.goalserve.com/getfeed"
         self.api_key_path = self.api_key  # The API key is included in the URL path
-        
-        # Initialize async client with GZIP support
+        self.client = None
+    
+    async def __aenter__(self):
+        """Async context manager entry"""
         self.client = httpx.AsyncClient(
             timeout=30.0,  # 30 second timeout
             headers={"Accept-Encoding": "gzip"}
         )
-    
-    async def __aenter__(self):
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.client.aclose()
+        """Async context manager exit"""
+        if self.client:
+            await self.client.aclose()
+            self.client = None
     
     def _build_url(self, endpoint: str) -> str:
         """Build the full URL for a Goalserve API endpoint"""
         return f"{self.base_url}/{self.api_key_path}/bsktbl/{endpoint}"
     
+    def get_team_id(self, team_name: str) -> str:
+        """Get the Goalserve team ID for a given team name"""
+        team_id = self.TEAM_IDS.get(team_name)
+        if not team_id:
+            raise ValueError(f"Unknown team name: {team_name}")
+        return team_id
+    
+    def parse_xml_to_dict(self, xml_str: str) -> Dict[str, Any]:
+        """Parse XML string to dictionary format"""
+        try:
+            root = ET.fromstring(xml_str)
+            return self.xml_element_to_dict(root)
+        except ET.ParseError as e:
+            logger.error(f"Error parsing XML: {str(e)}")
+            raise ValueError(f"Invalid XML format: {str(e)}")
+
+    def xml_element_to_dict(self, element: ET.Element) -> Dict[str, Any]:
+        """Convert XML element to dictionary recursively"""
+        result = {}
+        
+        # Add attributes
+        if element.attrib:
+            result.update(element.attrib)
+        
+        # Process child elements
+        for child in element:
+            child_data = self.xml_element_to_dict(child)
+            if child.tag in result:
+                if isinstance(result[child.tag], list):
+                    result[child.tag].append(child_data)
+                else:
+                    result[child.tag] = [result[child.tag], child_data]
+            else:
+                result[child.tag] = child_data
+        
+        # Add text content if it exists and element has no children
+        if element.text and element.text.strip() and not result:
+            result = element.text.strip()
+        
+        return result
+
     @observe(name="goalserve_make_request")
     async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make a request to the Goalserve API"""
+        if not self.client:
+            raise RuntimeError("Client not initialized. Use async with context manager.")
+            
         try:
             url = self._build_url(endpoint)
             params = params or {}
             params["key"] = self.api_key
 
-            async with self.client as client:
-                response = await client.get(url, params=params)
-                await response.raise_for_status()
-
-                if response.headers.get("content-encoding") == "gzip":
-                    decompressed = gzip.decompress(response.content)
-                    return json.loads(decompressed)
-                
-                return await response.json()
+            # Add retries for 500 errors
+            for attempt in range(3):
+                try:
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 500 and attempt < 2:
+                        logger.warning(f"Attempt {attempt + 1}: Got 500 error, retrying...")
+                        await asyncio.sleep(1)  # Wait 1 second before retry
+                        continue
+                    raise
+            
+            # Check content type
+            content_type = response.headers.get("content-type", "")
+            
+            # Handle gzipped content
+            content = response.content
+            if response.headers.get("content-encoding") == "gzip":
+                try:
+                    content = gzip.decompress(content)
+                except gzip.BadGzipFile as e:
+                    logger.warning(f"Failed to decompress gzipped content: {str(e)}")
+                    # Use raw content if decompression fails
+                    content = response.content
+            
+            # Convert to string for parsing
+            content_str = content.decode('utf-8')
+            
+            # Try parsing as JSON first
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try XML
+                if "xml" in content_type.lower():
+                    logger.info("Parsing response as XML")
+                    return self.parse_xml_to_dict(content_str)
+                else:
+                    logger.error(f"Unexpected content type: {content_type}")
+                    logger.error(f"Response content: {content_str[:200]}...")
+                    raise ValueError(f"Unable to parse response as JSON or XML")
 
         except Exception as e:
             logger.error(f"Error in API request: {str(e)}")
+            if isinstance(e, httpx.HTTPStatusError):
+                logger.error(f"Response content: {e.response.text[:200]}...")
             raise
     
     @observe(name="goalserve_get_upcoming_games")
@@ -179,9 +280,10 @@ class GoalserveNBAService:
             raise
     
     @observe(name="goalserve_get_team_stats")
-    async def get_team_stats(self, team_id: str) -> NBATeamStats:
+    async def get_team_stats(self, team_name: str) -> NBATeamStats:
         """Get current season statistics for an NBA team"""
         try:
+            team_id = self.get_team_id(team_name)
             data = await self._make_request(f"{team_id}_team_stats")
             team_data = data.get("statistic", {}).get("team", {})
             stats = team_data.get("stats", {})
@@ -205,9 +307,10 @@ class GoalserveNBAService:
             raise
     
     @observe(name="goalserve_get_player_stats")
-    async def get_player_stats(self, team_id: str) -> List[NBAPlayerStats]:
+    async def get_player_stats(self, team_name: str) -> List[NBAPlayerStats]:
         """Get current season statistics for all players on an NBA team"""
         try:
+            team_id = self.get_team_id(team_name)
             data = await self._make_request(f"{team_id}_team_stats")
             players = []
             for player in data.get("statistic", {}).get("team", {}).get("players", []):
@@ -249,8 +352,8 @@ class GoalserveNBAService:
                     game_id=match.get("id"),
                     home_team=home_team,
                     away_team=away_team,
-                    home_team_odds=float(odds.get("home_team_odds", "0.0")),
-                    away_team_odds=float(odds.get("away_team_odds", "0.0")),
+                    home_team_odds=float(odds.get("home_odds", "0.0")),
+                    away_team_odds=float(odds.get("away_odds", "0.0")),
                     spread=float(odds.get("spread", "0.0")),
                     total=float(odds.get("total", "0.0"))
                 ))
@@ -326,4 +429,26 @@ class GoalserveNBAService:
                 
         except Exception as e:
             logger.error(f"Error getting live scores: {str(e)}")
+            raise
+    
+    @observe(name="goalserve_get_injuries")
+    async def get_injuries(self, team_name: str) -> List[NBAInjuryReport]:
+        """Get injury reports for a team"""
+        try:
+            team_id = self.get_team_id(team_name)
+            data = await self._make_request(f"{team_id}_injuries")
+            
+            injuries = []
+            for report in data.get("team", {}).get("report", []):
+                injuries.append(NBAInjuryReport(
+                    player_id=report.get("player_id", ""),
+                    player_name=report.get("player_name", ""),
+                    status=report.get("status", ""),
+                    description=report.get("description"),
+                    date=report.get("date")
+                ))
+            return injuries
+                
+        except Exception as e:
+            logger.error(f"Error getting injury reports: {str(e)}")
             raise 

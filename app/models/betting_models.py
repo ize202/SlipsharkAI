@@ -105,4 +105,13 @@ class UserPreferences(BaseModel):
     favorite_leagues: List[str]
     stake_limits: Dict[str, float]
     notification_preferences: Dict[str, bool]
-    updated_at: datetime 
+    updated_at: datetime
+
+class PerplexityResponse(BaseModel):
+    """Response from Perplexity AI API"""
+    content: str = Field(description="Main content/summary of the response")
+    citations: List[Citation] = Field(default=[], description="Sources cited in the response")
+    related_questions: List[str] = Field(default=[], description="Related questions suggested by Perplexity")
+    key_points: List[str] = Field(default=[], description="Key points extracted from the analysis")
+    confidence_score: float = Field(default=0.5, description="Confidence score in the analysis (0-1)")
+    deep_research_recommended: bool = Field(default=False, description="Whether deep research is recommended") 

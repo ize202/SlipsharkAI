@@ -6,7 +6,7 @@ from ..models.betting_models import (
     DeepResearchResult,
     DataPoint
 )
-from ..Functions.llm_functions import analyze_query, quick_research, deep_research
+from ..functions.llm_functions import analyze_query, quick_research, deep_research
 
 # Set up logging
 logger = logging.getLogger(__name__)

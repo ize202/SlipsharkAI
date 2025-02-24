@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import os
 from pydantic import BaseModel
 from typing import Union
-from .chains.betting_chain import BettingResearchChain
+from .workflows.betting_chain import BettingResearchChain
 from .models.betting_models import QuickResearchResult, DeepResearchResult
 import logging
 

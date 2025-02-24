@@ -1,10 +1,17 @@
 ---
-description: This ruleset is to help you understand how to work with the perplexity models
+description: This ruleset is to help you understand how to work with the perplexity models. Use this whenever you're working with Perplexity 
 globs: 
 ---
 
 # Working with perplexity
 
+Important note we can't get structured output from perplexity. It's only available in tier 3 and we're tier 0 right nore
+
+Tier	Credit Purchase (all time)	Requests per minute (RPM)	Beta Features
+Tier 0	-	50	-
+Tier 1	$50	150	-
+Tier 2	$250	500	images, related questions
+Tier 3	$500	1000	search domain filter, structured outputs
 ## Chat Completions
 
 https://api.perplexity.ai/chat/completions

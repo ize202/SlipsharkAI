@@ -1,5 +1,5 @@
 ---
-description: These are the goalserve urls for access to basketball feeds
+description: These are the goalserve urls for access to basketball feeds. Use this whenever you're working with Goalserve
 globs: 
 ---
 # These are the urls to connect with goalserve datafeeds

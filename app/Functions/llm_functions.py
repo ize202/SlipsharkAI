@@ -40,7 +40,7 @@ async def analyze_query(user_input: str) -> QueryAnalysis:
     try:
         async with PerplexityService() as perplexity:
             analysis = await perplexity.analyze_query(user_input)
-            return QueryAnalysis.model_validate_json(analysis)
+            return analysis  # Already a QueryAnalysis object, no need for model_validate_json
             
     except Exception as e:
         logger.error(f"Error in analyze_query: {str(e)}", exc_info=True)
@@ -193,11 +193,12 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
                     search_recency="day"
                 ),
                 
-                # Goalserve NBA data
-                goalserve.get_team_stats(team_name),
-                goalserve.get_player_stats(team_name),
-                goalserve.get_game_odds(team_name),
-                goalserve.get_injuries(team_name),
+                # Goalserve NBA data - using all available endpoints
+                goalserve.get_team_stats(team_name),  # {team_id}_team_stats
+                goalserve.get_player_stats(team_name),  # {team_id}_stats
+                goalserve.get_odds_comparison(),  # nba-schedule?showodds=1
+                goalserve.get_injuries(team_name),  # {team_id}_injuries
+                goalserve.get_upcoming_games(team_name),  # nba-schedule
             ]
             
             # Add user history tasks if user_id is provided
@@ -244,12 +245,55 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
                 4. Historical betting patterns
                 5. Risk factors and confidence level
                 
-                Format your response as a structured JSON matching the DeepResearchResult model."""
+                IMPORTANT: Return ONLY a raw JSON object matching the DeepResearchResult model with the following structure:
+                {
+                    "summary": "Brief executive summary of the analysis",
+                    "insights": [
+                        {
+                            "category": "odds",  // Category can be: odds, performance, injury, etc.
+                            "insight": "Key insight about the betting opportunity",
+                            "impact": "How this affects betting decisions",
+                            "confidence": 0.85,  // Float between 0 and 1
+                            "supporting_data": ["Data point 1", "Data point 2"]  // Optional
+                        }
+                    ],
+                    "risk_factors": [
+                        {
+                            "factor": "Description of the risk factor",
+                            "severity": "high",  // Must be: "low", "medium", or "high"
+                            "mitigation": "Possible ways to mitigate this risk"  // Optional
+                        }
+                    ],
+                    "recommended_bet": "Recommended betting action based on analysis",
+                    "odds_analysis": {
+                        "current_line": -5.5,
+                        "line_movement": "stable",
+                        "market_sentiment": "balanced"
+                    },
+                    "historical_context": "Relevant historical betting patterns and trends",
+                    "confidence_score": 0.75,  // Float between 0 and 1
+                    "citations": [
+                        {
+                            "url": "https://example.com/source",
+                            "title": "Source Title",
+                            "snippet": "Relevant excerpt",
+                            "published_date": "2024-02-23T00:00:00Z"
+                        }
+                    ],
+                    "last_updated": "2024-02-23T12:34:56Z"
+                }
+                
+                DO NOT wrap the JSON in markdown code blocks or any other formatting.
+                DO NOT include any explanatory text before or after the JSON.
+                The JSON should start with { and end with } with no other characters.
+                ENSURE all required fields are present and properly formatted.
+                For risk_factors, severity MUST be one of: "low", "medium", "high" as a string."""
             },
             {"role": "user", "content": context}
         ]
         
-        completion = await openai.chat.completions.create(
+        # The new OpenAI client doesn't use await with create()
+        completion = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             temperature=0.2  # Lower temperature for more focused analysis
@@ -257,7 +301,22 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
 
         # Parse the LLM response into our result model
         analysis = completion.choices[0].message.content
-        return DeepResearchResult.model_validate_json(analysis)
+        
+        # Clean the JSON response
+        # Remove any markdown code block markers and whitespace
+        cleaned_json = analysis.strip()
+        if cleaned_json.startswith("```"):
+            cleaned_json = cleaned_json.split("```")[1]
+        if cleaned_json.startswith("json"):
+            cleaned_json = cleaned_json[4:]
+        cleaned_json = cleaned_json.strip()
+        
+        try:
+            return DeepResearchResult.model_validate_json(cleaned_json)
+        except Exception as e:
+            logger.error(f"Error parsing JSON response: {cleaned_json}")
+            logger.error(f"Validation error: {str(e)}")
+            raise
             
     except Exception as e:
         logger.error(f"Error in deep_research: {str(e)}", exc_info=True)
