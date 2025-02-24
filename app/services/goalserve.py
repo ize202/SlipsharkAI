@@ -49,16 +49,6 @@ class NBAPlayerStats(BaseModel):
     injury_status: Optional[str] = None
     injury_details: Optional[str] = None
 
-class NBAGameOdds(BaseModel):
-    """NBA game odds from Goalserve"""
-    game_id: str
-    home_team: str
-    away_team: str
-    home_team_odds: float
-    away_team_odds: float
-    spread: float
-    total: float
-
 class NBASchedule(BaseModel):
     """NBA game schedule from Goalserve"""
     game_id: str
@@ -496,29 +486,6 @@ class GoalserveNBAService:
             logger.error(f"Error getting player stats: {str(e)}")
             raise ValueError(f"Error getting player stats for team {team_id}") from e
     
-    @observe(name="goalserve_get_game_odds")
-    async def get_odds_comparison(self, team_name: str) -> List[NBAGameOdds]:
-        """Get odds comparison for upcoming games involving a specific team."""
-        endpoint = "nba-shedule"
-        params = {"showodds": "1"}
-        data = await self._make_request(endpoint, params)
-
-        odds_list = []
-        for match in data.get("matches", []):
-            odds = match.get("odds", {})
-            home_team = match.get("home_team", {}).get("name")
-            away_team = match.get("away_team", {}).get("name")
-            odds_list.append(NBAGameOdds(
-                game_id=match.get("id"),
-                home_team=home_team,
-                away_team=away_team,
-                home_team_odds=float(odds.get("home_odds", "0.0")),
-                away_team_odds=float(odds.get("away_odds", "0.0")),
-                spread=float(odds.get("spread", "0.0")),
-                total=float(odds.get("total", "0.0"))
-            ))
-        return odds_list
-    
     @observe(name="goalserve_get_head_to_head")
     async def get_head_to_head(self, team1_id: str, team2_id: str) -> NBAHeadToHead:
         """Get head-to-head comparison between two teams"""
@@ -625,22 +592,50 @@ class GoalserveNBAService:
             # Handle the nested format
             if "standings" in data and isinstance(data["standings"], dict):
                 standings = data["standings"]
-                if "category" in standings and isinstance(standings["category"], dict):
-                    category = standings["category"]
-                    if "league" in category and isinstance(category["league"], list):
-                        for league in category["league"]:
-                            if "division" in league and isinstance(league["division"], list):
-                                for division in league["division"]:
-                                    if "team" in division and isinstance(division["team"], list):
-                                        for team in division["team"]:
-                                            name = team.get("name", "")
-                                            team_id = team.get("id", "")
-                                            if name and team_id:
-                                                # Clean up team name
-                                                if name.startswith("USA: NBA "):
-                                                    name = name[9:]
-                                                self._team_ids[name] = team_id
-                                                logger.debug(f"Added team mapping: {name} -> {team_id}")
+                if "category" in standings:
+                    categories = standings["category"]
+                    # Handle both list and dict cases
+                    if isinstance(categories, dict):
+                        categories = [categories]
+                    elif not isinstance(categories, list):
+                        raise ValueError(f"Invalid category format: expected list or dict, got {type(categories)}")
+                    
+                    for category in categories:
+                        if "league" in category:
+                            leagues = category["league"]
+                            # Handle both list and dict cases
+                            if isinstance(leagues, dict):
+                                leagues = [leagues]
+                            elif not isinstance(leagues, list):
+                                continue
+                            
+                            for league in leagues:
+                                if "division" in league:
+                                    divisions = league["division"]
+                                    # Handle both list and dict cases
+                                    if isinstance(divisions, dict):
+                                        divisions = [divisions]
+                                    elif not isinstance(divisions, list):
+                                        continue
+                                    
+                                    for division in divisions:
+                                        if "team" in division:
+                                            teams = division["team"]
+                                            # Handle both list and dict cases
+                                            if isinstance(teams, dict):
+                                                teams = [teams]
+                                            elif not isinstance(teams, list):
+                                                continue
+                                            
+                                            for team in teams:
+                                                name = team.get("name", "")
+                                                team_id = team.get("id", "")
+                                                if name and team_id:
+                                                    # Clean up team name
+                                                    if name.startswith("USA: NBA "):
+                                                        name = name[9:]
+                                                    self._team_ids[name] = team_id
+                                                    logger.debug(f"Added team mapping: {name} -> {team_id}")
             
             if not self._team_ids:
                 logger.error("No team IDs were loaded from the standings data")

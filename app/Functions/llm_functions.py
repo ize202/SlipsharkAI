@@ -302,7 +302,6 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
             
             # Add common tasks
             tasks.extend([
-                goalserve.get_odds_comparison(),  # nba-schedule?showodds=1
                 goalserve.get_upcoming_games(teams[0]),  # nba-schedule
             ])
             
