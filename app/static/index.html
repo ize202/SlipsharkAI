@@ -119,6 +119,19 @@
             margin-left: 8px;
             vertical-align: middle;
         }
+        .conversational-response {
+            background-color: #f0f7ff;
+            border-left: 4px solid #0d6efd;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+        
+        .conversational-response p {
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
@@ -160,6 +173,8 @@
                     Quick Research Results
                 </div>
                 <div class="card-body">
+                    <div class="conversational-response" id="quickConversationalResponse"></div>
+                    
                     <h5 class="card-title" id="quickSummary"></h5>
                     <div class="confidence-meter mt-3 mb-3">
                         <div class="confidence-level" id="quickConfidence"></div>
@@ -195,6 +210,8 @@
                     Deep Research Results
                 </div>
                 <div class="card-body">
+                    <div class="conversational-response" id="deepConversationalResponse"></div>
+                    
                     <h5 class="card-title" id="deepSummary"></h5>
                     <div class="confidence-meter mt-3 mb-3">
                         <div class="confidence-level" id="deepConfidence"></div>
@@ -241,6 +258,22 @@
             let currentQuickResult = null;
             let originalQuery = '';
             
+            async function fetchWithConversationalResponse(url, options) {
+                const response = await fetch(url, options);
+                
+                if (!response.ok) {
+                    throw new Error('API request failed');
+                }
+                
+                const data = await response.json();
+                const conversationalResponse = response.headers.get('X-Conversational-Response');
+                
+                return {
+                    data,
+                    conversationalResponse
+                };
+            }
+            
             researchBtn.addEventListener('click', async function() {
                 const query = queryInput.value.trim();
                 originalQuery = query;
@@ -256,7 +289,7 @@
                 loadingIndicator.style.display = 'block';
                 
                 try {
-                    const response = await fetch(apiUrl, {
+                    const response = await fetchWithConversationalResponse(apiUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -267,20 +300,17 @@
                         })
                     });
                     
-                    if (!response.ok) {
-                        throw new Error('API request failed');
-                    }
-                    
-                    const result = await response.json();
+                    const result = response.data;
+                    const conversationalResponse = response.conversationalResponse;
                     
                     // Determine if it's a quick or deep result
                     if (result.hasOwnProperty('insights')) {
                         // Deep research result
-                        displayDeepResult(result);
+                        displayDeepResult(result, conversationalResponse);
                     } else {
                         // Quick research result
                         currentQuickResult = result;
-                        displayQuickResult(result);
+                        displayQuickResult(result, conversationalResponse);
                     }
                 } catch (error) {
                     console.error('Error:', error);
@@ -301,7 +331,7 @@
                 loadingIndicator.style.display = 'block';
                 
                 try {
-                    const response = await fetch(extendUrl, {
+                    const response = await fetchWithConversationalResponse(extendUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -312,12 +342,10 @@
                         })
                     });
                     
-                    if (!response.ok) {
-                        throw new Error('API request failed');
-                    }
+                    const result = response.data;
+                    const conversationalResponse = response.conversationalResponse;
                     
-                    const result = await response.json();
-                    displayDeepResult(result);
+                    displayDeepResult(result, conversationalResponse);
                 } catch (error) {
                     console.error('Error:', error);
                     alert('An error occurred while processing your request. Please try again.');
@@ -326,7 +354,16 @@
                 }
             });
             
-            function displayQuickResult(result) {
+            function displayQuickResult(result, conversationalResponse) {
+                // Display conversational response if available
+                const conversationalResponseElement = document.getElementById('quickConversationalResponse');
+                if (conversationalResponse) {
+                    conversationalResponseElement.innerHTML = conversationalResponse.replace(/\n/g, '<br>');
+                    conversationalResponseElement.style.display = 'block';
+                } else {
+                    conversationalResponseElement.style.display = 'none';
+                }
+                
                 document.getElementById('quickSummary').textContent = result.summary;
                 
                 const confidencePercent = Math.round(result.confidence_score * 100);
@@ -375,7 +412,16 @@
                 quickResultContainer.style.display = 'block';
             }
             
-            function displayDeepResult(result) {
+            function displayDeepResult(result, conversationalResponse) {
+                // Display conversational response if available
+                const conversationalResponseElement = document.getElementById('deepConversationalResponse');
+                if (conversationalResponse) {
+                    conversationalResponseElement.innerHTML = conversationalResponse.replace(/\n/g, '<br>');
+                    conversationalResponseElement.style.display = 'block';
+                } else {
+                    conversationalResponseElement.style.display = 'none';
+                }
+                
                 document.getElementById('deepSummary').textContent = result.summary;
                 
                 const confidencePercent = Math.round(result.confidence_score * 100);

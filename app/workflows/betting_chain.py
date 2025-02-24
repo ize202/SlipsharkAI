@@ -6,7 +6,7 @@ from ..models.betting_models import (
     DeepResearchResult,
     DataPoint
 )
-from ..functions.llm_functions import analyze_query, quick_research, deep_research
+from ..functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -54,12 +54,22 @@ class BettingResearchChain:
                 logger.info("Starting quick research path")
                 result = await quick_research(query_analysis)
                 
+                # Step 3: Generate final conversational response
+                enhanced_result = await generate_final_response(
+                    user_input, 
+                    result, 
+                    is_deep_research=False
+                )
+                
+                # Convert back to QuickResearchResult with the added conversational_response field
+                # We'll handle this in the API response
+                
                 # Check if deep research is recommended
                 if result.deep_research_recommended:
                     logger.info("Quick research suggests deep research is needed")
-                    return result  # Return quick result with recommendation for deep research
+                    return enhanced_result  # Return quick result with recommendation for deep research
                 
-                return result
+                return enhanced_result
 
             # Deep Research Path
             logger.info("Starting deep research path")
@@ -70,7 +80,15 @@ class BettingResearchChain:
 
             # Step 4: Perform deep research
             result = await deep_research(query_analysis, data_points)
-            return result
+            
+            # Step 5: Generate final conversational response
+            enhanced_result = await generate_final_response(
+                user_input, 
+                result, 
+                is_deep_research=True
+            )
+            
+            return enhanced_result
 
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
@@ -91,7 +109,8 @@ class BettingResearchChain:
         """
         try:
             # Re-analyze query with forced deep research
-            return await self.process_query(original_query, force_deep_research=True)
+            result = await self.process_query(original_query, force_deep_research=True)
+            return result
         except Exception as e:
             logger.error(f"Error extending research: {str(e)}", exc_info=True)
             raise 

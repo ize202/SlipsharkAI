@@ -89,6 +89,7 @@ class QuickResearchResult(BaseModel):
     citations: Optional[List[Citation]] = Field(default=[], description="Sources cited in the research")
     related_questions: Optional[List[str]] = Field(default=[], description="Related betting questions to consider")
     last_updated: str = Field(description="Timestamp of when this research was conducted")
+    conversational_response: Optional[str] = Field(default=None, description="Natural language conversational response")
 
 class DeepResearchResult(BaseModel):
     """Comprehensive research result using multiple data sources"""
@@ -102,6 +103,7 @@ class DeepResearchResult(BaseModel):
     citations: List[Citation] = Field(description="All sources used in the analysis")
     last_updated: str = Field(description="Timestamp of when this research was conducted")
     metadata: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata about the analysis")
+    conversational_response: Optional[str] = Field(default=None, description="Natural language conversational response")
 
 class BetHistory(BaseModel):
     """Model for bet details entries"""

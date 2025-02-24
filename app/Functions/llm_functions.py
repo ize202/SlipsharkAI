@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import logging
 from datetime import datetime, UTC
 import asyncio
@@ -432,4 +432,78 @@ def create_analysis_context(query: QueryAnalysis, data_points: List[DataPoint]) 
         "query": query.model_dump(),
         "data": {dp.source: dp.content for dp in data_points}
     }
-    return str(context)  # Convert to string for LLM input 
+    return str(context)  # Convert to string for LLM input
+
+@observe(name="generate_final_response")
+async def generate_final_response(
+    query: str,
+    research_result: Union[QuickResearchResult, DeepResearchResult],
+    is_deep_research: bool
+) -> Dict[str, Any]:
+    """
+    Final LLM call to generate a more natural, conversational response based on the research results.
+    
+    Args:
+        query: The original user query
+        research_result: The structured research result (either quick or deep)
+        is_deep_research: Whether this is a deep research result
+        
+    Returns:
+        Enhanced response with natural language elements
+    """
+    logger.info("Generating final conversational response")
+    
+    try:
+        # Create a system prompt that guides the model to generate a conversational response
+        system_prompt = """You are a professional sports betting analyst having a conversation with a bettor.
+        Your task is to take structured research results and convert them into a natural, conversational response.
+        
+        Guidelines:
+        1. Use a conversational, friendly tone while maintaining professionalism
+        2. Directly address the user's specific question
+        3. Highlight the most important insights first
+        4. Explain your confidence level and reasoning
+        5. Include specific data points that support your recommendation
+        6. Acknowledge uncertainties and risks
+        7. End with a clear recommendation
+        
+        The user's original query and the structured research results will be provided.
+        Your response should feel like advice from a knowledgeable friend rather than a data dump.
+        """
+        
+        # Convert the research result to a JSON string
+        result_json = research_result.model_dump_json()
+        
+        # Create the user message with the query and research results
+        user_message = f"""
+        Original Query: {query}
+        
+        Research Results: {result_json}
+        
+        Please convert this into a natural, conversational response that directly answers the query.
+        """
+        
+        # Make the OpenAI API call
+        response = await openai.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.7,  # Slightly higher temperature for more natural language
+            max_tokens=1000
+        )
+        
+        # Extract the response content
+        conversational_response = response.choices[0].message.content
+        
+        # Create an enhanced version of the original result
+        enhanced_result = research_result.model_dump()
+        enhanced_result["conversational_response"] = conversational_response
+        
+        return enhanced_result
+        
+    except Exception as e:
+        logger.error(f"Error generating final response: {str(e)}", exc_info=True)
+        # Return the original result if there's an error
+        return research_result.model_dump() 

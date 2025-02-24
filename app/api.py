@@ -4,7 +4,7 @@ from app.config import *
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
 import os
 from pydantic import BaseModel
@@ -76,7 +76,20 @@ async def analyze_betting_query(request: QueryRequest):
             request.query,
             force_deep_research=request.force_deep_research
         )
-        return result
+        
+        # Extract the conversational response if it exists
+        conversational_response = result.pop("conversational_response", None)
+        
+        # Add it as a header in the response
+        response = result
+        if conversational_response:
+            # Create a FastAPI response with headers
+            return JSONResponse(
+                content=response,
+                headers={"X-Conversational-Response": conversational_response}
+            )
+        
+        return response
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -91,7 +104,20 @@ async def extend_research(request: ExtendResearchRequest):
             request.quick_result,
             request.original_query
         )
-        return result
+        
+        # Extract the conversational response if it exists
+        conversational_response = result.pop("conversational_response", None)
+        
+        # Add it as a header in the response
+        response = result
+        if conversational_response:
+            # Create a FastAPI response with headers
+            return JSONResponse(
+                content=response,
+                headers={"X-Conversational-Response": conversational_response}
+            )
+        
+        return response
     except Exception as e:
         logger.error(f"Error extending research: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
