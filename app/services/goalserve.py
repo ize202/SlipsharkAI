@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, UTC
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
 import json
-import xml.etree.ElementTree as ET
 import asyncio
 
 # Set up logging
@@ -151,7 +150,7 @@ class GoalserveNBAService:
     
     def _build_url(self, endpoint: str) -> str:
         """Build the full URL for a Goalserve API endpoint"""
-        return f"{self.base_url}/{self.api_key_path}/bsktbl/{endpoint}"
+        return f"{self.base_url}/{self.api_key_path}/bsktbl/{endpoint}?json=1"
     
     def get_team_id(self, team_name: str) -> str:
         """Get the Goalserve team ID for a given team name"""
@@ -160,40 +159,6 @@ class GoalserveNBAService:
             raise ValueError(f"Unknown team name: {team_name}")
         return team_id
     
-    def parse_xml_to_dict(self, xml_str: str) -> Dict[str, Any]:
-        """Parse XML string to dictionary format"""
-        try:
-            root = ET.fromstring(xml_str)
-            return self.xml_element_to_dict(root)
-        except ET.ParseError as e:
-            logger.error(f"Error parsing XML: {str(e)}")
-            raise ValueError(f"Invalid XML format: {str(e)}")
-
-    def xml_element_to_dict(self, element: ET.Element) -> Dict[str, Any]:
-        """Convert XML element to dictionary recursively"""
-        result = {}
-        
-        # Add attributes
-        if element.attrib:
-            result.update(element.attrib)
-        
-        # Process child elements
-        for child in element:
-            child_data = self.xml_element_to_dict(child)
-            if child.tag in result:
-                if isinstance(result[child.tag], list):
-                    result[child.tag].append(child_data)
-                else:
-                    result[child.tag] = [result[child.tag], child_data]
-            else:
-                result[child.tag] = child_data
-        
-        # Add text content if it exists and element has no children
-        if element.text and element.text.strip() and not result:
-            result = element.text.strip()
-        
-        return result
-
     @observe(name="goalserve_make_request")
     async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make a request to the Goalserve API"""
@@ -218,34 +183,22 @@ class GoalserveNBAService:
                         continue
                     raise
             
-            # Check content type
-            content_type = response.headers.get("content-type", "")
-            
             # Handle gzipped content
-            content = response.content
             if response.headers.get("content-encoding") == "gzip":
                 try:
-                    content = gzip.decompress(content)
-                except gzip.BadGzipFile as e:
-                    logger.warning(f"Failed to decompress gzipped content: {str(e)}")
-                    # Use raw content if decompression fails
-                    content = response.content
+                    content = gzip.decompress(response.content)
+                    return json.loads(content)
+                except (gzip.BadGzipFile, json.JSONDecodeError) as e:
+                    logger.error(f"Failed to process gzipped content: {str(e)}")
+                    raise ValueError("Failed to process response content")
             
-            # Convert to string for parsing
-            content_str = content.decode('utf-8')
-            
-            # Try parsing as JSON first
+            # Regular JSON response
             try:
                 return response.json()
-            except json.JSONDecodeError:
-                # If JSON parsing fails, try XML
-                if "xml" in content_type.lower():
-                    logger.info("Parsing response as XML")
-                    return self.parse_xml_to_dict(content_str)
-                else:
-                    logger.error(f"Unexpected content type: {content_type}")
-                    logger.error(f"Response content: {content_str[:200]}...")
-                    raise ValueError(f"Unable to parse response as JSON or XML")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON response: {str(e)}")
+                logger.error(f"Response content: {response.text[:200]}...")
+                raise ValueError("Invalid JSON response from API")
 
         except Exception as e:
             logger.error(f"Error in API request: {str(e)}")
