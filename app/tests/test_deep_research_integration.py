@@ -4,6 +4,7 @@ import os
 from datetime import datetime, UTC
 import logging
 from typing import List, Dict, Any
+from langfuse.decorators import observe
 
 from app.models.betting_models import (
     DeepResearchResult,
@@ -30,6 +31,7 @@ requires_api_keys = pytest.mark.skipif(
 
 @pytest.mark.asyncio
 @requires_api_keys
+@observe(name="deep_research_test")
 async def test_deep_research_nba_real_integration():
     """Test the complete deep research workflow for NBA betting with real API calls"""
     
