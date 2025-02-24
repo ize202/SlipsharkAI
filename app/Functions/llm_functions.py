@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, UTC
 import asyncio
 import re
+import json
 from langfuse.decorators import observe
 from langfuse import Langfuse
 import openai
@@ -93,9 +94,95 @@ async def analyze_query(user_input: str) -> QueryAnalysis:
     logger.info("Starting query analysis")
     
     try:
-        async with PerplexityService() as perplexity:
-            analysis = await perplexity.analyze_query(user_input)
-            return analysis  # Already a QueryAnalysis object, no need for model_validate_json
+        # Create a system prompt that guides the model to extract structured information
+        system_prompt = """You are a sports betting query analyzer. Your task is to analyze betting queries and extract structured information.
+        
+        Extract the following information:
+        1. Sport type (e.g., basketball, football, etc.)
+        2. Teams mentioned (both teams if available)
+        3. Specific players mentioned
+        4. Type of bet (spread, moneyline, over/under, etc.)
+        5. Any specific odds or lines mentioned
+        6. Timeframe (when the game is)
+        7. Any specific matchups or aspects of interest
+        
+        Return ONLY a JSON object with this exact structure:
+        {
+            "raw_query": "the original query",
+            "sport_type": "basketball",  // lowercase sport name
+            "teams": {
+                "team1": "full team name",
+                "team2": "full team name"  // if mentioned
+            },
+            "players": ["player1", "player2"],  // if mentioned
+            "bet_type": "spread",  // or appropriate bet type
+            "odds_mentioned": "-5.5",  // if any odds are mentioned
+            "game_date": "2024-02-24",  // if mentioned
+            "matchup_focus": "specific matchup or aspect of interest",
+            "is_deep_research": true,  // whether this needs deep analysis
+            "confidence_score": 0.85,  // how confident we are in this analysis
+            "required_data_sources": [
+                "team_stats",
+                "player_stats",
+                "odds",
+                "injuries",
+                "news"
+            ]
+        }
+        
+        DO NOT include any explanatory text, just the JSON object.
+        Ensure all team names are complete and standardized (e.g., "Denver Nuggets" not just "Nuggets").
+        Set is_deep_research to true if the query asks about specific matchups, trends, or detailed analysis.
+        """
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ]
+        
+        # Get analysis from GPT-4o-mini
+        completion = openai.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.1  # Low temperature for consistent structured output
+        )
+        
+        # Extract and parse the JSON response
+        analysis_json = completion.choices[0].message.content.strip()
+        
+        # Clean the JSON response
+        if analysis_json.startswith("```"):
+            analysis_json = analysis_json.split("```")[1]
+        if analysis_json.startswith("json"):
+            analysis_json = analysis_json[4:]
+        analysis_json = analysis_json.strip()
+        
+        # Parse the cleaned JSON into our QueryAnalysis model
+        analysis_dict = json.loads(analysis_json)
+        
+        # Map the sport type to our SportType enum
+        sport_map = {
+            "basketball": SportType.BASKETBALL,
+            "football": SportType.FOOTBALL,
+            "baseball": SportType.BASEBALL,
+            "hockey": SportType.HOCKEY,
+            "soccer": SportType.SOCCER
+        }
+        
+        # Create the QueryAnalysis object
+        return QueryAnalysis(
+            raw_query=analysis_dict["raw_query"],
+            sport_type=sport_map.get(analysis_dict.get("sport_type", "").lower(), SportType.OTHER),
+            teams=analysis_dict.get("teams", {}),
+            players=analysis_dict.get("players", []),
+            bet_type=analysis_dict.get("bet_type", ""),
+            odds_mentioned=analysis_dict.get("odds_mentioned"),
+            game_date=analysis_dict.get("game_date"),
+            matchup_focus=analysis_dict.get("matchup_focus"),
+            is_deep_research=analysis_dict.get("is_deep_research", False),
+            confidence_score=analysis_dict.get("confidence_score", 0.5),
+            required_data_sources=analysis_dict.get("required_data_sources", [])
+        )
             
     except Exception as e:
         logger.error(f"Error in analyze_query: {str(e)}", exc_info=True)

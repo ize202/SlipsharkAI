@@ -41,12 +41,44 @@ class RiskFactor(BaseModel):
 
 class QueryAnalysis(BaseModel):
     """Analysis of the user's betting query"""
-    raw_query: str
-    sport_type: SportType
-    is_deep_research: bool
-    confidence_score: float
-    required_data_sources: List[str]
-    bet_type: Optional[str] = None
+    raw_query: str = Field(description="The original query text")
+    sport_type: SportType = Field(description="Type of sport being bet on")
+    teams: Dict[str, str] = Field(
+        default={},
+        description="Teams mentioned in the query (e.g., {'team1': 'Denver Nuggets', 'team2': 'Indiana Pacers'})"
+    )
+    players: List[str] = Field(
+        default=[],
+        description="Players mentioned in the query"
+    )
+    bet_type: str = Field(
+        default="",
+        description="Type of bet (spread, moneyline, over/under, etc.)"
+    )
+    odds_mentioned: Optional[str] = Field(
+        default=None,
+        description="Any specific odds or lines mentioned in the query"
+    )
+    game_date: Optional[str] = Field(
+        default=None,
+        description="Date of the game if mentioned"
+    )
+    matchup_focus: Optional[str] = Field(
+        default=None,
+        description="Specific matchup or aspect of interest"
+    )
+    is_deep_research: bool = Field(
+        default=False,
+        description="Whether this query requires deep research"
+    )
+    confidence_score: float = Field(
+        default=0.5,
+        description="Confidence in the query analysis (0-1)"
+    )
+    required_data_sources: List[str] = Field(
+        default=[],
+        description="Data sources needed for analysis"
+    )
 
 class QuickResearchResult(BaseModel):
     """Result from quick research flow using Perplexity AI"""
