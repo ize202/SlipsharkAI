@@ -117,6 +117,115 @@ class GoalserveNBAService:
         self.api_key_path = self.api_key  # The API key is included in the URL path
         self.client = None
         self._team_ids = {}  # Cache for team IDs
+        
+        # Standard mappings for team name variations
+        self._team_name_mappings = {
+            # Los Angeles Lakers variations
+            "lakers": "Los Angeles Lakers",
+            "la lakers": "Los Angeles Lakers",
+            "l.a. lakers": "Los Angeles Lakers",
+            
+            # Golden State Warriors variations
+            "warriors": "Golden State Warriors",
+            "gsw": "Golden State Warriors",
+            "golden state": "Golden State Warriors",
+            
+            # Boston Celtics variations
+            "celtics": "Boston Celtics",
+            
+            # Brooklyn Nets variations
+            "nets": "Brooklyn Nets",
+            
+            # New York Knicks variations
+            "knicks": "New York Knicks",
+            "ny knicks": "New York Knicks",
+            
+            # Philadelphia 76ers variations
+            "76ers": "Philadelphia 76ers",
+            "sixers": "Philadelphia 76ers",
+            "philly": "Philadelphia 76ers",
+            
+            # Toronto Raptors variations
+            "raptors": "Toronto Raptors",
+            
+            # Chicago Bulls variations
+            "bulls": "Chicago Bulls",
+            
+            # Cleveland Cavaliers variations
+            "cavaliers": "Cleveland Cavaliers",
+            "cavs": "Cleveland Cavaliers",
+            
+            # Detroit Pistons variations
+            "pistons": "Detroit Pistons",
+            
+            # Indiana Pacers variations
+            "pacers": "Indiana Pacers",
+            
+            # Milwaukee Bucks variations
+            "bucks": "Milwaukee Bucks",
+            
+            # Atlanta Hawks variations
+            "hawks": "Atlanta Hawks",
+            
+            # Charlotte Hornets variations
+            "hornets": "Charlotte Hornets",
+            
+            # Miami Heat variations
+            "heat": "Miami Heat",
+            
+            # Orlando Magic variations
+            "magic": "Orlando Magic",
+            
+            # Washington Wizards variations
+            "wizards": "Washington Wizards",
+            
+            # Denver Nuggets variations
+            "nuggets": "Denver Nuggets",
+            
+            # Minnesota Timberwolves variations
+            "timberwolves": "Minnesota Timberwolves",
+            "wolves": "Minnesota Timberwolves",
+            
+            # Oklahoma City Thunder variations
+            "thunder": "Oklahoma City Thunder",
+            "okc": "Oklahoma City Thunder",
+            "okc thunder": "Oklahoma City Thunder",
+            
+            # Portland Trail Blazers variations
+            "trail blazers": "Portland Trail Blazers",
+            "blazers": "Portland Trail Blazers",
+            
+            # Utah Jazz variations
+            "jazz": "Utah Jazz",
+            
+            # Dallas Mavericks variations
+            "mavericks": "Dallas Mavericks",
+            "mavs": "Dallas Mavericks",
+            
+            # Houston Rockets variations
+            "rockets": "Houston Rockets",
+            
+            # Memphis Grizzlies variations
+            "grizzlies": "Memphis Grizzlies",
+            
+            # New Orleans Pelicans variations
+            "pelicans": "New Orleans Pelicans",
+            
+            # San Antonio Spurs variations
+            "spurs": "San Antonio Spurs",
+            
+            # LA Clippers variations
+            "clippers": "LA Clippers",
+            "la clippers": "LA Clippers",
+            "l.a. clippers": "LA Clippers",
+            "los angeles clippers": "LA Clippers",
+            
+            # Phoenix Suns variations
+            "suns": "Phoenix Suns",
+            
+            # Sacramento Kings variations
+            "kings": "Sacramento Kings",
+        }
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -257,17 +366,55 @@ class GoalserveNBAService:
                 logger.error(f"Response content: {e.response.text[:500]}")
             raise
     
+    def normalize_team_name(self, team_name: str) -> str:
+        """
+        Normalize team name to match the official names used by Goalserve.
+        
+        Args:
+            team_name: The team name to normalize
+            
+        Returns:
+            Normalized team name that matches Goalserve's naming convention
+        """
+        if not team_name:
+            return ""
+            
+        # First check if the name is already in the correct format
+        if team_name in self._team_ids:
+            return team_name
+            
+        # Try direct mapping from our predefined variations
+        normalized = self._team_name_mappings.get(team_name.lower())
+        if normalized:
+            logger.info(f"Normalized team name from '{team_name}' to '{normalized}'")
+            return normalized
+            
+        # Check if it's a partial match with any of the official team names
+        for official_name in self._team_ids.keys():
+            if team_name.lower() in official_name.lower():
+                logger.info(f"Matched partial team name '{team_name}' to '{official_name}'")
+                return official_name
+                
+        # If we still don't have a match, log a warning and return the original
+        logger.warning(f"Could not normalize team name: '{team_name}'")
+        return team_name
+        
     # Cache team IDs for 24 hours since they rarely change
     @redis_cache(ttl=86400, prefix="goalserve_team_id")
     def get_team_id(self, team_name: str) -> str:
         """Get the Goalserve team ID for a given team name"""
-        logger.debug(f"Looking up team ID for: '{team_name}'")
+        # First normalize the team name
+        normalized_name = self.normalize_team_name(team_name)
+        
+        logger.debug(f"Looking up team ID for: '{normalized_name}' (original: '{team_name}')")
         logger.debug(f"Available team mappings: {json.dumps(self._team_ids, indent=2)}")
-        team_id = self._team_ids.get(team_name)
+        
+        team_id = self._team_ids.get(normalized_name)
         if not team_id:
-            logger.error(f"Could not find team ID for '{team_name}'. Available teams: {list(self._team_ids.keys())}")
-            raise ValueError(f"Unknown team name: {team_name}")
-        logger.info(f"Found team ID '{team_id}' for team '{team_name}'")
+            logger.error(f"Could not find team ID for '{normalized_name}'. Available teams: {list(self._team_ids.keys())}")
+            raise ValueError(f"Unknown team name: {normalized_name}")
+            
+        logger.info(f"Found team ID '{team_id}' for team '{normalized_name}'")
         return team_id
     
     # Cache upcoming games for 30 minutes

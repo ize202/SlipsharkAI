@@ -139,6 +139,12 @@
         <div class="header">
             <h1>Sports Betting Research Assistant <span class="beta-badge">BETA</span></h1>
             <p class="lead">Ask any sports betting question and get instant research</p>
+            <div class="alert alert-info mt-3">
+                <strong>Demo Version:</strong> This is a demonstration of our sports betting research assistant. 
+                Some features may be limited, and data might not be real-time. For entertainment purposes only.
+                <br>
+                <small>Try queries like: "Should I bet on the Lakers to cover the spread?" or "What's the best bet for the Warriors game tonight?"</small>
+            </div>
         </div>
 
         <div class="card">
@@ -165,6 +171,17 @@
                 <span class="visually-hidden">Loading...</span>
             </div>
             <p class="mt-2">Researching your query...</p>
+            <div class="progress mt-3" style="height: 5px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" id="loadingProgressBar" role="progressbar" style="width: 0%"></div>
+            </div>
+            <p class="text-muted mt-2" id="loadingTimeoutMessage" style="display: none;">
+                This is taking longer than expected. The system might be processing a complex query or experiencing high demand.
+            </p>
+        </div>
+
+        <div class="alert alert-danger mt-3" id="errorMessage" style="display: none;">
+            <strong>Error:</strong> <span id="errorMessageText"></span>
+            <button type="button" class="btn btn-sm btn-outline-danger mt-2" id="retryButton">Try Again</button>
         </div>
 
         <div class="result-container" id="quickResultContainer" style="display: none;">
@@ -251,12 +268,68 @@
             const deepResearchCheck = document.getElementById('deepResearchCheck');
             const researchBtn = document.getElementById('researchBtn');
             const loadingIndicator = document.getElementById('loadingIndicator');
+            const loadingProgressBar = document.getElementById('loadingProgressBar');
+            const loadingTimeoutMessage = document.getElementById('loadingTimeoutMessage');
+            const errorMessage = document.getElementById('errorMessage');
+            const errorMessageText = document.getElementById('errorMessageText');
+            const retryButton = document.getElementById('retryButton');
             const quickResultContainer = document.getElementById('quickResultContainer');
             const deepResultContainer = document.getElementById('deepResultContainer');
             const deepResearchBtn = document.getElementById('deepResearchBtn');
             
             let currentQuickResult = null;
             let originalQuery = '';
+            let loadingTimer = null;
+            let loadingProgressTimer = null;
+            
+            // Function to handle loading timeout
+            function startLoadingTimers() {
+                // Reset progress bar
+                loadingProgressBar.style.width = '0%';
+                loadingTimeoutMessage.style.display = 'none';
+                
+                // Start progress bar animation
+                let progress = 0;
+                loadingProgressTimer = setInterval(() => {
+                    progress += 1;
+                    // Slow down as we approach 100%
+                    if (progress > 80) {
+                        progress += 0.2;
+                    } else if (progress > 50) {
+                        progress += 0.5;
+                    }
+                    
+                    if (progress >= 100) {
+                        clearInterval(loadingProgressTimer);
+                        progress = 100;
+                    }
+                    loadingProgressBar.style.width = `${progress}%`;
+                }, 300);
+                
+                // Show timeout message after 15 seconds
+                setTimeout(() => {
+                    loadingTimeoutMessage.style.display = 'block';
+                }, 15000);
+                
+                // Show error after 60 seconds
+                loadingTimer = setTimeout(() => {
+                    clearInterval(loadingProgressTimer);
+                    loadingIndicator.style.display = 'none';
+                    errorMessageText.textContent = 'The request timed out. This could be due to high demand or a complex query. Please try again.';
+                    errorMessage.style.display = 'block';
+                }, 60000);
+            }
+            
+            function clearLoadingTimers() {
+                if (loadingTimer) {
+                    clearTimeout(loadingTimer);
+                    loadingTimer = null;
+                }
+                if (loadingProgressTimer) {
+                    clearInterval(loadingProgressTimer);
+                    loadingProgressTimer = null;
+                }
+            }
             
             async function fetchWithConversationalResponse(url, options) {
                 const response = await fetch(url, options);
@@ -286,7 +359,11 @@
                 // Reset UI
                 quickResultContainer.style.display = 'none';
                 deepResultContainer.style.display = 'none';
+                errorMessage.style.display = 'none';
                 loadingIndicator.style.display = 'block';
+                
+                // Start loading timers
+                startLoadingTimers();
                 
                 try {
                     const response = await fetchWithConversationalResponse(apiUrl, {
@@ -299,6 +376,9 @@
                             force_deep_research: deepResearchCheck.checked
                         })
                     });
+                    
+                    // Clear timers on success
+                    clearLoadingTimers();
                     
                     const result = response.data;
                     const conversationalResponse = response.conversationalResponse;
@@ -314,10 +394,17 @@
                     }
                 } catch (error) {
                     console.error('Error:', error);
-                    alert('An error occurred while processing your request. Please try again.');
+                    clearLoadingTimers();
+                    errorMessageText.textContent = 'An error occurred while processing your request. Please try again.';
+                    errorMessage.style.display = 'block';
                 } finally {
                     loadingIndicator.style.display = 'none';
                 }
+            });
+            
+            retryButton.addEventListener('click', function() {
+                errorMessage.style.display = 'none';
+                researchBtn.click();
             });
             
             deepResearchBtn.addEventListener('click', async function() {
@@ -328,7 +415,11 @@
                 // Reset UI
                 quickResultContainer.style.display = 'none';
                 deepResultContainer.style.display = 'none';
+                errorMessage.style.display = 'none';
                 loadingIndicator.style.display = 'block';
+                
+                // Start loading timers
+                startLoadingTimers();
                 
                 try {
                     const response = await fetchWithConversationalResponse(extendUrl, {
@@ -342,13 +433,18 @@
                         })
                     });
                     
+                    // Clear timers on success
+                    clearLoadingTimers();
+                    
                     const result = response.data;
                     const conversationalResponse = response.conversationalResponse;
                     
                     displayDeepResult(result, conversationalResponse);
                 } catch (error) {
                     console.error('Error:', error);
-                    alert('An error occurred while processing your request. Please try again.');
+                    clearLoadingTimers();
+                    errorMessageText.textContent = 'An error occurred while processing your request. Please try again.';
+                    errorMessage.style.display = 'block';
                 } finally {
                     loadingIndicator.style.display = 'none';
                 }

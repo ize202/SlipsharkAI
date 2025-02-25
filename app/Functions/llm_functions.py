@@ -274,9 +274,11 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
     
     try:
         # Get team names from the query analysis
-        teams = list(query.teams.values())
+        teams = [team for team in query.teams.values() if team]  # Filter out empty team names
         if not teams:
-            raise ValueError("No teams found in query analysis")
+            # Fallback for when no teams are specified - use a generic basketball query
+            logger.warning("No teams found in query analysis, using generic basketball research")
+            teams = ["NBA"]
         
         # Initialize services
         perplexity = PerplexityService()
@@ -288,54 +290,159 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
         async with perplexity, goalserve:
             # Define all the tasks we want to run in parallel
             tasks = []
+            task_metadata = []  # Store metadata about each task for better error handling
+            
+            # Add Perplexity tasks for general research regardless of team specificity
+            tasks.append(
+                perplexity.quick_research(
+                    query=f"Latest basketball betting information for {query.raw_query}",
+                    search_recency="day"
+                )
+            )
+            task_metadata.append({
+                "type": "perplexity_research",
+                "description": "General basketball betting information",
+                "critical": False  # This task is not critical, we can proceed without it
+            })
             
             # Add tasks for each team
             for team in teams:
-                tasks.extend([
-                    # Perplexity web search for each team
-                    perplexity.quick_research(
-                        query=f"Latest news, injuries, and betting trends for {team}",
-                        search_recency="day"
-                    ),
+                if team != "NBA":  # Skip team-specific queries for generic NBA
+                    # Add Perplexity search for this team regardless of Goalserve availability
+                    # This ensures we always have some data even if Goalserve fails
+                    tasks.append(
+                        perplexity.quick_research(
+                            query=f"Latest news, injuries, and betting trends for {team}",
+                            search_recency="day"
+                        )
+                    )
+                    task_metadata.append({
+                        "type": "perplexity_team_research",
+                        "team": team,
+                        "description": f"Team-specific news and trends for {team}",
+                        "critical": False
+                    })
                     
-                    # Goalserve NBA data - using all available endpoints
-                    goalserve.get_team_stats(team),  # {team_id}_team_stats
-                    goalserve.get_player_stats(team),  # {team_id}_stats
-                    goalserve.get_injuries(team),  # {team_id}_injuries
-                ])
+                    # Try to get team-specific data from Goalserve
+                    try:
+                        # Try to get team ID first to validate the team exists
+                        team_id = goalserve.get_team_id(team)
+                        if team_id:
+                            # Add Goalserve NBA data tasks
+                            tasks.append(goalserve.get_team_stats(team))
+                            task_metadata.append({
+                                "type": "goalserve_team_stats",
+                                "team": team,
+                                "description": f"Team statistics for {team}",
+                                "critical": False
+                            })
+                            
+                            tasks.append(goalserve.get_player_stats(team))
+                            task_metadata.append({
+                                "type": "goalserve_player_stats",
+                                "team": team,
+                                "description": f"Player statistics for {team}",
+                                "critical": False
+                            })
+                            
+                            tasks.append(goalserve.get_injuries(team))
+                            task_metadata.append({
+                                "type": "goalserve_injuries",
+                                "team": team,
+                                "description": f"Injury reports for {team}",
+                                "critical": False
+                            })
+                    except Exception as e:
+                        logger.warning(f"Could not add team-specific Goalserve tasks for {team}: {str(e)}")
+                        # We already added the Perplexity fallback above, so no need to add it again
             
             # Add common tasks
-            tasks.extend([
-                goalserve.get_upcoming_games(teams[0]),  # nba-schedule
-            ])
+            try:
+                tasks.append(goalserve.get_upcoming_games(teams[0]))
+                task_metadata.append({
+                    "type": "goalserve_upcoming_games",
+                    "description": "Upcoming NBA games",
+                    "critical": False
+                })
+            except Exception as e:
+                logger.warning(f"Could not add upcoming games task: {str(e)}")
+                # Add a fallback Perplexity search for upcoming games
+                tasks.append(
+                    perplexity.quick_research(
+                        query=f"Upcoming NBA games schedule for {teams[0]}",
+                        search_recency="day"
+                    )
+                )
+                task_metadata.append({
+                    "type": "perplexity_upcoming_games",
+                    "description": "Upcoming NBA games (fallback)",
+                    "critical": False
+                })
             
             # Add user history tasks if user_id is provided
             if user_id:
-                tasks.extend([
-                    supabase.get_user_bets(user_id, sport="basketball", days_back=30),
-                    supabase.get_user_stats(user_id, sport="basketball"),
-                    supabase.get_similar_bets(
-                        sport="basketball",
-                        bet_type=query.bet_type if query.bet_type else "any",
-                        days_back=30
+                try:
+                    tasks.append(supabase.get_user_bets(user_id, sport="basketball", days_back=30))
+                    task_metadata.append({
+                        "type": "supabase_user_bets",
+                        "description": "User's recent basketball bets",
+                        "critical": False
+                    })
+                    
+                    tasks.append(supabase.get_user_stats(user_id, sport="basketball"))
+                    task_metadata.append({
+                        "type": "supabase_user_stats",
+                        "description": "User's basketball betting statistics",
+                        "critical": False
+                    })
+                    
+                    tasks.append(
+                        supabase.get_similar_bets(
+                            sport="basketball",
+                            bet_type=query.bet_type if query.bet_type else "any",
+                            days_back=30
+                        )
                     )
-                ])
+                    task_metadata.append({
+                        "type": "supabase_similar_bets",
+                        "description": "Similar basketball bets",
+                        "critical": False
+                    })
+                except Exception as e:
+                    logger.warning(f"Could not add user history tasks: {str(e)}")
             
             # Execute all tasks in parallel
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             # Process results and handle any exceptions
+            successful_tasks = 0
+            failed_tasks = 0
+            
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(f"Error in task {i}: {str(result)}")
-                    continue
-                
-                # Add successful results to data points
-                if result:
-                    data_points.append(DataPoint(
-                        source=tasks[i].__qualname__,
-                        content=result.model_dump() if hasattr(result, 'model_dump') else str(result)
-                    ))
+                    failed_tasks += 1
+                    task_info = task_metadata[i] if i < len(task_metadata) else {"description": f"Task {i}"}
+                    logger.error(f"Error in {task_info['description']}: {str(result)}")
+                    
+                    # For critical tasks, we might want to raise an exception
+                    if i < len(task_metadata) and task_metadata[i].get("critical", False):
+                        raise ValueError(f"Critical task failed: {task_info['description']}")
+                else:
+                    successful_tasks += 1
+                    # Add successful results to data points
+                    if result:
+                        task_info = task_metadata[i] if i < len(task_metadata) else {"type": f"task_{i}"}
+                        data_points.append(DataPoint(
+                            source=task_info.get("type", tasks[i].__qualname__),
+                            content=result.model_dump() if hasattr(result, 'model_dump') else str(result)
+                        ))
+            
+            logger.info(f"Completed {successful_tasks} tasks successfully, {failed_tasks} tasks failed")
+            
+            # Check if we have enough data to proceed
+            if len(data_points) == 0:
+                logger.error("No data points were collected, cannot proceed with analysis")
+                raise ValueError("Failed to collect any data for analysis")
         
         # Combine all data into a coherent context for the LLM
         context = create_analysis_context(query, data_points)
@@ -381,11 +488,16 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
                     "historical_context": "Relevant historical betting patterns and trends",
                     "confidence_score": 0.75,  // Float between 0 and 1
                     "citations": [
+                        // IMPORTANT: Only include citations if you have actual source information from the data.
+                        // If no source information is available, return an empty array: []
+                        // DO NOT use example.com or placeholder URLs.
+                        // If you have information from news sources, use the actual source name and URL if available.
+                        // Example of a good citation:
                         {
-                            "url": "https://example.com/source",
-                            "title": "Source Title",
-                            "snippet": "Relevant excerpt",
-                            "published_date": null  // Use actual date if available
+                            "url": "https://www.espn.com/nba/story/_/id/12345/lakers-injury-report",
+                            "title": "Lakers Injury Report: Latest Updates",
+                            "snippet": "LeBron James is listed as questionable for tonight's game.",
+                            "published_date": null
                         }
                     ],
                     "last_updated": null  // Will be set to current time
@@ -430,16 +542,47 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
             # Parse the JSON into a dictionary first
             result_dict = json.loads(cleaned_json)
             
-            # Ensure last_updated is a string
-            if result_dict.get("last_updated") is None:
-                result_dict["last_updated"] = datetime.now(UTC).isoformat()
+            # Ensure last_updated is a string with the current time
+            result_dict["last_updated"] = datetime.now(UTC).isoformat()
                 
             # Convert back to JSON and validate
             return DeepResearchResult.model_validate(result_dict)
         except Exception as e:
             logger.error(f"Error parsing JSON response: {cleaned_json}")
             logger.error(f"Validation error: {str(e)}")
-            raise
+            
+            # Create a fallback response with minimal data
+            fallback_response = {
+                "summary": f"Analysis of {query.raw_query} (limited data available)",
+                "insights": [
+                    {
+                        "category": "data_limitation",
+                        "insight": "Limited data available for this query",
+                        "impact": "Unable to provide comprehensive analysis at this time",
+                        "confidence": 0.3,
+                        "supporting_data": []
+                    }
+                ],
+                "risk_factors": [
+                    {
+                        "factor": "Insufficient data for reliable analysis",
+                        "severity": "high",
+                        "mitigation": "Try a more specific query or check back later"
+                    }
+                ],
+                "recommended_bet": "Unable to make a recommendation with the available data",
+                "odds_analysis": {
+                    "current_line": None,
+                    "line_movement": "unknown",
+                    "market_sentiment": "unknown"
+                },
+                "historical_context": "No historical context available",
+                "confidence_score": 0.3,
+                "citations": [],
+                "last_updated": datetime.now(UTC).isoformat()
+            }
+            
+            return DeepResearchResult.model_validate(fallback_response)
             
     except Exception as e:
         logger.error(f"Error in deep_research: {str(e)}", exc_info=True)
@@ -589,5 +732,23 @@ async def generate_final_response(
         
     except Exception as e:
         logger.error(f"Error generating final response: {str(e)}", exc_info=True)
-        # Return the original result if there's an error
-        return research_result.model_dump() 
+        
+        # Create a fallback conversational response
+        research_type = "deep" if is_deep_research else "quick"
+        summary = research_result.summary if hasattr(research_result, "summary") else "Analysis of your query"
+        
+        fallback_response = f"""
+        Hey there! Thanks for your question about "{query}".
+        
+        Based on my {research_type} research, here's what I found: {summary}
+        
+        I apologize that I couldn't generate a more detailed conversational response at this time. 
+        The structured data in the results section below should still provide you with valuable insights.
+        
+        If you have any specific follow-up questions, feel free to ask!
+        """
+        
+        # Return the original result with the fallback conversational response
+        result_dict = research_result.model_dump()
+        result_dict["conversational_response"] = fallback_response
+        return result_dict 
