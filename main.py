@@ -6,9 +6,7 @@ import os
 import sys
 import logging
 import traceback
-import glob
 import subprocess
-import shutil
 
 # Configure basic logging
 logging.basicConfig(
@@ -41,70 +39,18 @@ try:
 except Exception as e:
     logger.info(f"Not a Git repository or Git not available: {str(e)}")
 
-# Handle case sensitivity issue between app/functions and app/Functions
-logger.info("Checking for case sensitivity issues in directory structure...")
-base_dir = os.path.dirname(os.path.abspath(__file__))
-app_dir = os.path.join(base_dir, 'app')
-functions_lower = os.path.join(app_dir, 'functions')
-functions_upper = os.path.join(app_dir, 'Functions')
-
-# Check both paths
-logger.info(f"Checking lowercase path: {functions_lower}")
-logger.info(f"Checking uppercase path: {functions_upper}")
-
-# Create directories if they don't exist
-if not os.path.exists(functions_lower):
-    logger.info(f"Creating lowercase functions directory")
-    os.makedirs(functions_lower, exist_ok=True)
-    with open(os.path.join(functions_lower, '__init__.py'), 'w') as f:
-        f.write('# Auto-generated __init__.py\n')
-
-if not os.path.exists(functions_upper):
-    logger.info(f"Creating uppercase Functions directory")
-    os.makedirs(functions_upper, exist_ok=True)
-    with open(os.path.join(functions_upper, '__init__.py'), 'w') as f:
-        f.write('# Auto-generated __init__.py\n')
-
-# Check for llm_functions.py in both locations
-llm_functions_lower = os.path.join(functions_lower, 'llm_functions.py')
-llm_functions_upper = os.path.join(functions_upper, 'llm_functions.py')
-
-# If file exists in one location but not the other, copy it
-if os.path.exists(llm_functions_lower) and not os.path.exists(llm_functions_upper):
-    logger.info(f"Copying llm_functions.py from lowercase to uppercase path")
-    shutil.copy2(llm_functions_lower, llm_functions_upper)
-elif os.path.exists(llm_functions_upper) and not os.path.exists(llm_functions_lower):
-    logger.info(f"Copying llm_functions.py from uppercase to lowercase path")
-    shutil.copy2(llm_functions_upper, llm_functions_lower)
-
-# Check for key files
+# Check for key files (but don't try to fix them - that's done by fix_directory_structure.py)
 logger.info("Checking for key files:")
-for file_pattern in ["app/functions/llm_functions.py", "app/Functions/llm_functions.py", "app/models/betting_models.py"]:
+for file_pattern in ["app/functions/llm_functions.py", "app/models/betting_models.py"]:
     if os.path.exists(file_pattern):
         logger.info(f"Found {file_pattern}")
         # Check file size
         size = os.path.getsize(file_pattern)
         logger.info(f"{file_pattern} size: {size} bytes")
-        # Check first few lines
-        try:
-            with open(file_pattern, 'r') as f:
-                first_lines = [next(f) for _ in range(5)]
-                logger.info(f"{file_pattern} first few lines: {first_lines}")
-        except Exception as e:
-            logger.info(f"Error reading {file_pattern}: {str(e)}")
     else:
         logger.info(f"File not found: {file_pattern}")
 
 try:
-    # First try to fix the directory structure if needed
-    logger.info("Ensuring directory structure is correct...")
-    try:
-        from fix_directory_structure import fix_directory_structure
-        fix_directory_structure()
-    except Exception as e:
-        logger.error(f"Failed to fix directory structure: {str(e)}")
-        traceback.print_exc()
-    
     # Try to import the FastAPI app
     logger.info("Trying to import FastAPI app...")
     try:

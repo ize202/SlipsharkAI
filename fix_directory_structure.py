@@ -86,6 +86,13 @@ def fix_directory_structure():
         else:
             print(f" - FILE: {item}")
     
+    # Determine if we're in a Railway deployment by checking for /app path
+    is_railway_deployment = os.path.exists('/app')
+    if is_railway_deployment:
+        print("Detected Railway deployment environment")
+    else:
+        print("Running in local environment")
+    
     # Ensure app directory exists
     app_dir = os.path.join(base_dir, 'app')
     ensure_directory(app_dir)
@@ -98,68 +105,76 @@ def fix_directory_structure():
         ensure_directory(dir_path)
         ensure_init_file(dir_path)
     
-    # Handle case sensitivity issue - create symbolic link if needed
+    # Define uppercase and lowercase function directory paths
     functions_lower = os.path.join(app_dir, 'functions')
     functions_upper = os.path.join(app_dir, 'Functions')
     
-    # Check if we have the uppercase directory but not the lowercase
-    if os.path.exists(functions_upper) and not os.path.exists(functions_lower):
-        print(f"Creating lowercase functions directory to match imports")
-        ensure_directory(functions_lower)
-        ensure_init_file(functions_lower)
+    # Standardize on lowercase 'functions' for Railway deployments for simplicity
+    # While maintaining backward compatibility with existing code
     
-    # Check if we have the lowercase directory but not the uppercase
-    if os.path.exists(functions_lower) and not os.path.exists(functions_upper):
-        print(f"Creating uppercase Functions directory to match Git tracking")
+    # First, ensure both directories exist
+    ensure_directory(functions_lower)
+    ensure_init_file(functions_lower)
+    
+    if not is_railway_deployment:
+        # Only create Functions (uppercase) in local environment if needed
+        # Railway should just use lowercase to avoid duplication
         ensure_directory(functions_upper)
         ensure_init_file(functions_upper)
     
     # Look for llm_functions.py in various locations
     llm_functions_source = find_file('llm_functions.py')
-    llm_functions_path_lower = os.path.join(app_dir, 'functions', 'llm_functions.py')
-    llm_functions_path_upper = os.path.join(app_dir, 'Functions', 'llm_functions.py')
+    llm_functions_path_lower = os.path.join(functions_lower, 'llm_functions.py')
+    llm_functions_path_upper = os.path.join(functions_upper, 'llm_functions.py') if not is_railway_deployment else None
     
-    # Copy to both locations to ensure it works regardless of case
+    # Handle llm_functions.py
     if llm_functions_source:
-        # Copy to lowercase path
-        if llm_functions_source != llm_functions_path_lower:
+        # Copy to lowercase path if needed (this is our standard path)
+        if llm_functions_source != llm_functions_path_lower and not os.path.exists(llm_functions_path_lower):
             print(f"Copying {llm_functions_source} to {llm_functions_path_lower}")
             try:
                 shutil.copy2(llm_functions_source, llm_functions_path_lower)
                 print(f"Successfully copied llm_functions.py to lowercase path")
             except Exception as e:
                 print(f"Error copying file to lowercase path: {str(e)}")
-                create_placeholder_llm_functions(llm_functions_path_lower)
+                # Only create placeholder if file doesn't exist at all
+                if not os.path.exists(llm_functions_path_lower):
+                    create_placeholder_llm_functions(llm_functions_path_lower)
         
-        # Copy to uppercase path
-        if llm_functions_source != llm_functions_path_upper:
+        # Copy to uppercase path if not in Railway and if needed
+        if not is_railway_deployment and llm_functions_path_upper and llm_functions_source != llm_functions_path_upper and not os.path.exists(llm_functions_path_upper):
             print(f"Copying {llm_functions_source} to {llm_functions_path_upper}")
             try:
                 shutil.copy2(llm_functions_source, llm_functions_path_upper)
                 print(f"Successfully copied llm_functions.py to uppercase path")
             except Exception as e:
                 print(f"Error copying file to uppercase path: {str(e)}")
-                create_placeholder_llm_functions(llm_functions_path_upper)
+                # Only create placeholder if file doesn't exist at all
+                if llm_functions_path_upper and not os.path.exists(llm_functions_path_upper):
+                    create_placeholder_llm_functions(llm_functions_path_upper)
     else:
-        # Create placeholders in both locations
+        # Create placeholders only if files don't exist
         if not os.path.exists(llm_functions_path_lower):
             create_placeholder_llm_functions(llm_functions_path_lower)
-        if not os.path.exists(llm_functions_path_upper):
+        
+        if not is_railway_deployment and llm_functions_path_upper and not os.path.exists(llm_functions_path_upper):
             create_placeholder_llm_functions(llm_functions_path_upper)
     
     # Look for betting_models.py in various locations
     models_source = find_file('betting_models.py')
     models_path = os.path.join(app_dir, 'models', 'betting_models.py')
     
-    if models_source and models_source != models_path:
+    # Handle betting_models.py
+    if models_source and models_source != models_path and not os.path.exists(models_path):
         print(f"Copying {models_source} to {models_path}")
         try:
             shutil.copy2(models_source, models_path)
             print(f"Successfully copied betting_models.py")
         except Exception as e:
             print(f"Error copying file: {str(e)}")
-            # Create placeholder as fallback
-            create_placeholder_betting_models(models_path)
+            # Only create placeholder if file doesn't exist
+            if not os.path.exists(models_path):
+                create_placeholder_betting_models(models_path)
     elif not os.path.exists(models_path):
         create_placeholder_betting_models(models_path)
     else:
