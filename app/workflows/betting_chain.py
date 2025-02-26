@@ -6,7 +6,34 @@ from app.models.betting_models import (
     DeepResearchResult,
     DataPoint
 )
-from app.functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
+
+# Try different import approaches to handle potential path issues
+try:
+    # First try absolute import
+    from app.functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
+except ImportError:
+    try:
+        # Try relative import
+        from ..functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
+    except ImportError:
+        try:
+            # Try direct import (if functions is at the same level as workflows)
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+            from functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
+        except ImportError as e:
+            # Log error but allow startup for debugging
+            logging.error(f"Failed to import llm_functions: {str(e)}")
+            # Define placeholder functions that will raise clear errors if called
+            async def analyze_query(*args, **kwargs):
+                raise ImportError("LLM functions not properly imported")
+            async def quick_research(*args, **kwargs):
+                raise ImportError("LLM functions not properly imported")
+            async def deep_research(*args, **kwargs):
+                raise ImportError("LLM functions not properly imported")
+            async def generate_final_response(*args, **kwargs):
+                raise ImportError("LLM functions not properly imported")
 
 # Set up logging
 logger = logging.getLogger(__name__)
