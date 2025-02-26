@@ -24,6 +24,11 @@ The following environment variables should be set in your Railway project:
 - `ANALYZE_RATE_LIMIT`: Rate limit for the /analyze endpoint (default: "30/minute")
 - `EXTEND_RATE_LIMIT`: Rate limit for the /extend endpoint (default: "10/minute")
 
+### Logging Configuration
+
+- `LOG_LEVEL`: Logging level (default: "INFO", options: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+- `ENABLE_JSON_LOGGING`: Whether to enable JSON-formatted logging for better log aggregation (default: "false")
+
 ### Redis Configuration (Recommended)
 
 - `REDIS_URL`: URL for your Redis instance (format: `redis://username:password@host:port`)
@@ -124,6 +129,60 @@ For more sophisticated automatic adjustments:
    - Lower limits during peak usage times
 3. Set up alerts when usage approaches thresholds to proactively adjust limits
 
+## Error Handling and Debugging
+
+The API includes comprehensive error handling and logging to make debugging easier:
+
+### Standardized Error Responses
+
+All API errors follow a standardized format:
+
+```json
+{
+  "error": {
+    "id": "unique-error-id",
+    "timestamp": "2023-06-01T12:34:56.789Z",
+    "status_code": 400,
+    "error_code": "validation_error",
+    "message": "Human-readable error message",
+    "details": {
+      "additional": "error details"
+    }
+  }
+}
+```
+
+### Request Tracking
+
+- Each request is assigned a unique `X-Request-ID` header
+- This ID is included in all logs related to the request
+- Include this ID when reporting issues for faster troubleshooting
+
+### Logging Configuration
+
+Adjust logging behavior with environment variables:
+
+- Set `LOG_LEVEL=DEBUG` for more detailed logs during troubleshooting
+- Enable `ENABLE_JSON_LOGGING=true` for structured logs that can be parsed by log aggregation tools
+
+### Common Error Codes
+
+- `validation_error`: Request validation failed (HTTP 422)
+- `authentication_error`: Authentication failed (HTTP 401)
+- `authorization_error`: Not authorized to access resource (HTTP 403)
+- `rate_limit_exceeded`: Rate limit exceeded (HTTP 429)
+- `external_api_error`: Error from external API (HTTP 502)
+
+### Viewing Logs in Railway
+
+1. Go to your Railway project dashboard
+2. Click on your service
+3. Go to the "Logs" tab
+4. Use the search functionality to filter logs by:
+   - Request ID
+   - Error code
+   - Endpoint path
+
 ## Troubleshooting
 
 ### Rate Limit Errors
@@ -142,12 +201,22 @@ If Redis connection fails:
 2. Check the `REDIS_URL` environment variable
 3. Verify that the Redis service is running
 
+### API Errors
+
+If you're seeing unexpected errors:
+
+1. Check the logs for the specific error details using the error ID
+2. Verify that all required environment variables are set correctly
+3. For external API errors, check the status of the dependent services
+
 ## Best Practices
 
 1. **Start Conservative**: Begin with lower rate limits and increase as needed
 2. **Monitor Usage**: Regularly check the usage statistics to understand patterns
 3. **Adjust Dynamically**: Adjust rate limits based on actual usage and cost considerations
 4. **Use Redis**: For production, always use Redis for rate limiting to ensure consistency across instances
+5. **Enable JSON Logging**: In production, enable JSON logging for better log aggregation
+6. **Set Appropriate Log Level**: Use INFO in production, DEBUG for troubleshooting
 
 ## API Endpoints
 
@@ -156,6 +225,7 @@ If Redis connection fails:
 - `GET /cache/stats`: Get cache statistics
 - `POST /cache/clear`: Clear cache entries
 - `POST /admin/usage`: Get API usage statistics (admin only)
+- `GET /health`: Health check endpoint for monitoring
 
 ## Cost Control Strategies
 
