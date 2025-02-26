@@ -73,6 +73,57 @@ For example, to allow 100 requests per minute to the analyze endpoint:
 ANALYZE_RATE_LIMIT=100/minute
 ```
 
+### Handling Viral Growth
+
+If your app experiences viral growth, you can quickly adjust rate limits without code changes:
+
+#### Option 1: Quick Environment Variable Updates
+
+1. Log in to your Railway dashboard
+2. Navigate to your project
+3. Go to the "Variables" tab
+4. Update the rate limit variables with higher values:
+   ```
+   DEFAULT_RATE_LIMIT="200/minute"
+   ANALYZE_RATE_LIMIT="100/minute"
+   EXTEND_RATE_LIMIT="50/minute"
+   ```
+5. Railway will automatically restart your service with the new limits
+
+This is the fastest way to respond to increased demand without any code changes.
+
+#### Option 2: Implement Tiered Rate Limiting
+
+For different user tiers with different rate limits:
+
+1. Create multiple API keys for different user tiers
+2. Add tier-specific environment variables:
+   ```
+   PREMIUM_DEFAULT_RATE_LIMIT="300/minute"
+   PREMIUM_ANALYZE_RATE_LIMIT="150/minute"
+   PREMIUM_EXTEND_RATE_LIMIT="75/minute"
+   
+   BASIC_DEFAULT_RATE_LIMIT="100/minute"
+   BASIC_ANALYZE_RATE_LIMIT="50/minute"
+   BASIC_EXTEND_RATE_LIMIT="25/minute"
+   ```
+3. Distribute different API keys to users based on their tier
+4. Update the rate limit configuration to check for the user's tier and apply the appropriate limit
+
+#### Option 3: Dynamic Rate Limiting
+
+For more sophisticated automatic adjustments:
+
+1. Create a scheduled task (using Railway cron jobs or a separate service) that:
+   - Runs every hour or at specific intervals
+   - Analyzes usage patterns from Redis usage tracking data
+   - Calculates optimal rate limits based on current load and time of day
+   - Uses Railway's API to programmatically update environment variables
+2. Implement time-based rate limiting:
+   - Higher limits during off-peak hours
+   - Lower limits during peak usage times
+3. Set up alerts when usage approaches thresholds to proactively adjust limits
+
 ## Troubleshooting
 
 ### Rate Limit Errors
