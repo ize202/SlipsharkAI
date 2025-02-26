@@ -12,6 +12,7 @@ from typing import Union, Dict, Any
 from .workflows.betting_chain import BettingResearchChain
 from .models.betting_models import QuickResearchResult, DeepResearchResult
 from .utils.cache import clear_cache, get_cache_stats
+from .middleware.auth import APIKeyMiddleware
 import logging
 
 # Load environment variables
@@ -35,6 +36,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add API Key authentication middleware
+app.add_middleware(APIKeyMiddleware)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
