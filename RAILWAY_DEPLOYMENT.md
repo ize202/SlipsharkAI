@@ -152,11 +152,24 @@ All API errors follow a standardized format:
 }
 ```
 
+This consistent format makes it easier to:
+- Identify the specific error that occurred
+- Track errors across multiple services
+- Provide meaningful feedback to clients
+- Automate error handling in client applications
+
 ### Request Tracking
 
 - Each request is assigned a unique `X-Request-ID` header
 - This ID is included in all logs related to the request
 - Include this ID when reporting issues for faster troubleshooting
+- Request IDs are preserved across service boundaries for end-to-end tracing
+
+The request tracking middleware automatically:
+- Generates a unique ID if not provided by the client
+- Adds the ID to response headers
+- Includes timing information for performance monitoring
+- Logs request start and completion events
 
 ### Logging Configuration
 
@@ -165,6 +178,13 @@ Adjust logging behavior with environment variables:
 - Set `LOG_LEVEL=DEBUG` for more detailed logs during troubleshooting
 - Enable `ENABLE_JSON_LOGGING=true` for structured logs that can be parsed by log aggregation tools
 
+The logging system provides:
+- Structured JSON logging for machine parsing
+- Human-readable format for development
+- Contextual information with each log entry
+- Exception details with stack traces when needed
+- Performance metrics for request processing
+
 ### Common Error Codes
 
 - `validation_error`: Request validation failed (HTTP 422)
@@ -172,6 +192,8 @@ Adjust logging behavior with environment variables:
 - `authorization_error`: Not authorized to access resource (HTTP 403)
 - `rate_limit_exceeded`: Rate limit exceeded (HTTP 429)
 - `external_api_error`: Error from external API (HTTP 502)
+- `service_unavailable`: Service temporarily unavailable (HTTP 503)
+- `internal_error`: Unexpected internal error (HTTP 500)
 
 ### Viewing Logs in Railway
 
@@ -182,32 +204,77 @@ Adjust logging behavior with environment variables:
    - Request ID
    - Error code
    - Endpoint path
+   - Log level
+   - Time range
 
-## Troubleshooting
+For more advanced log analysis:
+- Export logs to a dedicated log management system
+- Set up alerts for critical errors
+- Create dashboards for monitoring error rates
+- Analyze trends to identify recurring issues
 
-### Rate Limit Errors
+### Debugging Rate Limit Issues
 
-If clients are receiving 429 Too Many Requests errors:
+If you're experiencing rate limit errors:
 
-1. Check the current rate limits in the environment variables
-2. Consider increasing the limits if necessary
-3. Implement client-side retry logic with exponential backoff
+1. Check the response headers for rate limit information:
+   - `X-RateLimit-Limit`: Maximum requests allowed in the period
+   - `X-RateLimit-Remaining`: Remaining requests in the current period
+   - `X-RateLimit-Reset`: Time when the rate limit resets (Unix timestamp)
 
-### Redis Connection Issues
+2. Examine the error response for details:
+   - The `error_code` will be `rate_limit_exceeded`
+   - The `details` field contains the specific limit that was exceeded
+   - The `Retry-After` header indicates when to retry the request
+
+3. Adjust client behavior:
+   - Implement exponential backoff for retries
+   - Cache responses to reduce API calls
+   - Batch requests when possible
+   - Distribute requests evenly over time
+
+### Handling Common Deployment Issues
+
+#### Redis Connection Problems
 
 If Redis connection fails:
 
 1. The system will fall back to in-memory rate limiting
 2. Check the `REDIS_URL` environment variable
 3. Verify that the Redis service is running
+4. Look for connection timeout errors in the logs
+5. Test Redis connectivity from the Railway shell
 
-### API Errors
+#### API Key Authentication Issues
 
-If you're seeing unexpected errors:
+If authentication is failing:
 
-1. Check the logs for the specific error details using the error ID
-2. Verify that all required environment variables are set correctly
-3. For external API errors, check the status of the dependent services
+1. Verify the API key is correctly set in the environment
+2. Check that clients are sending the key in the correct header
+3. Look for `authentication_error` codes in the logs
+4. Regenerate the API key if necessary
+
+#### External Service Dependencies
+
+If external API calls are failing:
+
+1. Check the status of the dependent services
+2. Look for `external_api_error` codes in the logs
+3. Verify API keys for external services are valid
+4. Implement circuit breakers for unreliable services
+
+## Monitoring and Alerting
+
+Set up monitoring and alerting to proactively identify issues:
+
+1. **Health Check Endpoint**: The `/health` endpoint provides basic service health information
+2. **Usage Statistics**: The `/admin/usage` endpoint provides detailed usage metrics
+3. **Railway Metrics**: Use Railway's built-in metrics for CPU, memory, and network usage
+4. **Custom Alerts**: Set up alerts for:
+   - High error rates
+   - Increased latency
+   - Rate limit exhaustion
+   - Memory or CPU spikes
 
 ## Best Practices
 

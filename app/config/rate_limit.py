@@ -3,7 +3,8 @@ Rate limiting configuration for the Sports Research API.
 Provides rate limiting for API endpoints to control costs and prevent abuse.
 """
 import os
-from slowapi import Limiter
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 import logging
 
@@ -21,6 +22,9 @@ limiter = Limiter(
     default_limits=[DEFAULT_RATE_LIMIT],
     storage_uri=os.getenv("REDIS_URL", "memory://"),  # Use Redis if available, otherwise in-memory
 )
+
+# Store the default rate limit handler for compatibility
+rate_limit_exceeded_handler = _rate_limit_exceeded_handler
 
 # Log rate limit configuration
 logger.info(f"Rate limiting configured with default limit: {DEFAULT_RATE_LIMIT}")

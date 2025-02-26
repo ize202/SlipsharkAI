@@ -15,7 +15,7 @@ from .models.betting_models import QuickResearchResult, DeepResearchResult
 from .utils.cache import clear_cache, get_cache_stats
 from .middleware.auth import APIKeyMiddleware
 from .middleware.usage_tracking import UsageTrackingMiddleware, get_usage_stats
-from .config.rate_limit import limiter, ANALYZE_RATE_LIMIT, EXTEND_RATE_LIMIT, get_api_key
+from .config.rate_limit import limiter, ANALYZE_RATE_LIMIT, EXTEND_RATE_LIMIT, get_api_key, rate_limit_exceeded_handler
 from .config.auth import verify_api_key
 from .config.logging_config import configure_logging, get_logger
 from .utils.error_handling import (
@@ -23,7 +23,8 @@ from .utils.error_handling import (
     api_error_handler, 
     validation_exception_handler,
     http_exception_handler,
-    general_exception_handler
+    general_exception_handler,
+    RateLimitAPIError
 )
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -61,7 +62,22 @@ app.add_exception_handler(Exception, general_exception_handler)
 
 # Attach rate limiter to the app
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, limiter.error_handler)
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+# Custom handler for rate limit exceeded errors that overrides the default
+@app.exception_handler(RateLimitExceeded)
+async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """
+    Handle rate limit exceeded errors with our standardized error format
+    """
+    rate_limit_error = RateLimitAPIError(
+        message="Rate limit exceeded. Please slow down your requests.",
+        details={
+            "limit": str(exc.detail) if hasattr(exc, "detail") else "Rate limit exceeded",
+            "retry_after": exc.headers.get("Retry-After", "60") if hasattr(exc, "headers") else "60"
+        }
+    )
+    return await api_error_handler(request, rate_limit_error)
 
 # Configure CORS
 app.add_middleware(
@@ -147,18 +163,18 @@ async def health_check():
 
 @app.post("/analyze", response_model=Union[QuickResearchResult, DeepResearchResult])
 @limiter.limit(ANALYZE_RATE_LIMIT, key_func=get_api_key)
-async def analyze_betting_query(request: QueryRequest, req: Request):
+async def analyze_betting_query(query_request: QueryRequest, request: Request):
     """
     Analyze a sports betting query and return either quick or deep research results.
     Rate limited to control costs and prevent abuse.
     """
-    request_logger = get_logger("analyze", {"request_id": req.state.request_id})
-    request_logger.info(f"Analyzing query: {request.query[:50]}...")
+    request_logger = get_logger("analyze", {"request_id": request.state.request_id})
+    request_logger.info(f"Analyzing query: {query_request.query[:50]}...")
     
     try:
         result = await betting_chain.process_query(
-            request.query,
-            force_deep_research=request.force_deep_research
+            query_request.query,
+            force_deep_research=query_request.force_deep_research
         )
         
         # Extract the conversational response if it exists
@@ -170,7 +186,7 @@ async def analyze_betting_query(request: QueryRequest, req: Request):
             # Add it to the response content
             response["conversational_response"] = conversational_response
         
-        request_logger.info(f"Analysis complete: {request.query[:50]}...")
+        request_logger.info(f"Analysis complete: {query_request.query[:50]}...")
         return response
     except Exception as e:
         request_logger.error(f"Error processing query: {str(e)}", exc_info=True)
@@ -178,18 +194,18 @@ async def analyze_betting_query(request: QueryRequest, req: Request):
 
 @app.post("/extend", response_model=DeepResearchResult)
 @limiter.limit(EXTEND_RATE_LIMIT, key_func=get_api_key)
-async def extend_research(request: ExtendResearchRequest, req: Request):
+async def extend_research(extend_request: ExtendResearchRequest, request: Request):
     """
     Extend a quick research result into a deep research analysis.
     Heavily rate limited due to high resource usage.
     """
-    request_logger = get_logger("extend", {"request_id": req.state.request_id})
-    request_logger.info(f"Extending research for query: {request.original_query[:50]}...")
+    request_logger = get_logger("extend", {"request_id": request.state.request_id})
+    request_logger.info(f"Extending research for query: {extend_request.original_query[:50]}...")
     
     try:
         result = await betting_chain.extend_research(
-            request.quick_result,
-            request.original_query
+            extend_request.quick_result,
+            extend_request.original_query
         )
         
         # Extract the conversational response if it exists
@@ -201,7 +217,7 @@ async def extend_research(request: ExtendResearchRequest, req: Request):
             # Add it to the response content
             response["conversational_response"] = conversational_response
         
-        request_logger.info(f"Extended research complete: {request.original_query[:50]}...")
+        request_logger.info(f"Extended research complete: {extend_request.original_query[:50]}...")
         return response
     except Exception as e:
         request_logger.error(f"Error extending research: {str(e)}", exc_info=True)
@@ -209,11 +225,11 @@ async def extend_research(request: ExtendResearchRequest, req: Request):
 
 @app.get("/cache/stats")
 @limiter.limit("30/minute", key_func=get_api_key)
-async def cache_stats(req: Request):
+async def cache_stats(request: Request):
     """
     Get cache statistics
     """
-    request_logger = get_logger("cache", {"request_id": req.state.request_id})
+    request_logger = get_logger("cache", {"request_id": request.state.request_id})
     request_logger.info("Retrieving cache statistics")
     
     try:
@@ -225,16 +241,16 @@ async def cache_stats(req: Request):
 
 @app.post("/cache/clear")
 @limiter.limit("10/minute", key_func=get_api_key)
-async def clear_cache_endpoint(request: CacheRequest, req: Request):
+async def clear_cache_endpoint(cache_request: CacheRequest, request: Request):
     """
     Clear cache entries matching the given pattern
     """
-    request_logger = get_logger("cache", {"request_id": req.state.request_id})
-    request_logger.info(f"Clearing cache with pattern: {request.pattern}")
+    request_logger = get_logger("cache", {"request_id": request.state.request_id})
+    request_logger.info(f"Clearing cache with pattern: {cache_request.pattern}")
     
     try:
-        clear_cache(request.pattern)
-        return {"status": "success", "message": f"Cache cleared with pattern: {request.pattern}"}
+        clear_cache(cache_request.pattern)
+        return {"status": "success", "message": f"Cache cleared with pattern: {cache_request.pattern}"}
     except Exception as e:
         request_logger.error(f"Error clearing cache: {str(e)}", exc_info=True)
         raise
@@ -242,19 +258,19 @@ async def clear_cache_endpoint(request: CacheRequest, req: Request):
 @app.post("/admin/usage")
 @limiter.limit("20/minute", key_func=get_api_key)
 async def usage_statistics(
-    request: UsageStatsRequest, 
-    req: Request,
+    stats_request: UsageStatsRequest, 
+    request: Request,
     api_key: str = Depends(verify_api_key)
 ):
     """
     Get API usage statistics.
     Admin-only endpoint that requires API key authentication.
     """
-    request_logger = get_logger("admin", {"request_id": req.state.request_id})
-    request_logger.info(f"Retrieving usage statistics for days: {request.days}")
+    request_logger = get_logger("admin", {"request_id": request.state.request_id})
+    request_logger.info(f"Retrieving usage statistics for days: {stats_request.days}")
     
     try:
-        stats = await get_usage_stats(request.api_key, request.days)
+        stats = await get_usage_stats(stats_request.api_key, stats_request.days)
         return stats
     except Exception as e:
         request_logger.error(f"Error getting usage stats: {str(e)}", exc_info=True)
