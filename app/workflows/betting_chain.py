@@ -1,12 +1,12 @@
 import logging
 from typing import Optional, Union
-from ..models.betting_models import (
+from app.models.betting_models import (
     QueryAnalysis,
     QuickResearchResult,
     DeepResearchResult,
     DataPoint
 )
-from ..functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
+from app.functions.llm_functions import analyze_query, quick_research, deep_research, generate_final_response
 
 # Set up logging
 logger = logging.getLogger(__name__)
