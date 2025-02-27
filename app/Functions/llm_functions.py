@@ -11,6 +11,7 @@ from ..config.langfuse_init import langfuse  # Use the initialized Langfuse inst
 from ..services.perplexity import PerplexityService, PerplexityResponse
 from ..services.api_sports_basketball import APISportsBasketballService
 from ..services.supabase import SupabaseService
+from ..config import get_logger
 
 from ..models.betting_models import (
     QueryAnalysis,
@@ -24,12 +25,7 @@ from ..models.betting_models import (
 )
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Using the latest model for best performance
 model = "gpt-4o-mini"
@@ -775,3 +771,169 @@ async def generate_final_response(
         result_dict = research_result.model_dump()
         result_dict["conversational_response"] = fallback_response
         return result_dict 
+
+async def structured_llm_call(
+    prompt: str,
+    messages: List[Dict[str, str]],
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+    model: str = model,
+    should_validate_json: bool = True
+) -> Dict[str, Any]:
+    """
+    Make a structured LLM call that expects and validates JSON responses.
+    
+    Args:
+        prompt: System prompt that sets up the context and requirements
+        messages: List of message dictionaries with role and content
+        temperature: Controls randomness (0.0-1.0)
+        max_tokens: Maximum tokens in response
+        model: Model to use
+        should_validate_json: Whether to validate and parse JSON response
+        
+    Returns:
+        Parsed JSON response as dictionary
+    """
+    try:
+        # Construct the messages array with system prompt
+        full_messages = [
+            {"role": "system", "content": prompt},
+            *messages
+        ]
+        
+        # Make the OpenAI API call
+        completion = await openai.chat.completions.create(
+            model=model,
+            messages=full_messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        # Extract the response content
+        response_text = completion.choices[0].message.content.strip()
+        
+        if should_validate_json:
+            # Clean the JSON response
+            if response_text.startswith("```"):
+                # Extract JSON from code blocks
+                matches = re.findall(r"```(?:json)?\n(.*?)```", response_text, re.DOTALL)
+                if matches:
+                    response_text = matches[0]
+                else:
+                    response_text = response_text.replace("```", "")
+            
+            # Remove any json language identifier
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+            
+            response_text = response_text.strip()
+            
+            try:
+                # Parse and validate JSON
+                return json.loads(response_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON response: {str(e)}")
+                logger.error(f"Raw response: {response_text}")
+                raise ValueError("LLM response was not valid JSON")
+        else:
+            # Return raw response for non-JSON cases
+            return {"response": response_text}
+            
+    except Exception as e:
+        logger.error(f"Error in structured_llm_call: {str(e)}", exc_info=True)
+        raise
+
+async def raw_llm_call(
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+    model: str = model
+) -> str:
+    """
+    Make a raw LLM call for cases where we just want text output.
+    
+    Args:
+        system_prompt: System message that sets up the context
+        user_prompt: User message/query
+        temperature: Controls randomness (0.0-1.0)
+        max_tokens: Maximum tokens in response
+        model: Model to use
+        
+    Returns:
+        Raw text response
+    """
+    try:
+        completion = await openai.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        return completion.choices[0].message.content.strip()
+        
+    except Exception as e:
+        logger.error(f"Error in raw_llm_call: {str(e)}", exc_info=True)
+        raise
+
+async def stream_llm_call(
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.7,
+    model: str = model
+):
+    """
+    Stream LLM responses for real-time output.
+    
+    Args:
+        system_prompt: System message that sets up the context
+        user_prompt: User message/query
+        temperature: Controls randomness (0.0-1.0)
+        model: Model to use
+        
+    Yields:
+        Chunks of the response as they arrive
+    """
+    try:
+        stream = await openai.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=temperature,
+            stream=True
+        )
+        
+        async for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                yield chunk.choices[0].delta.content
+                
+    except Exception as e:
+        logger.error(f"Error in stream_llm_call: {str(e)}", exc_info=True)
+        raise
+
+def clean_json_string(json_str: str) -> str:
+    """Clean and prepare a string for JSON parsing"""
+    # Remove code block markers
+    json_str = re.sub(r"```json\s*|\s*```", "", json_str)
+    
+    # Remove any json language identifier
+    if json_str.startswith("json"):
+        json_str = json_str[4:]
+    
+    return json_str.strip()
+
+def validate_json_response(response: str) -> Dict[str, Any]:
+    """Validate and parse a JSON response string"""
+    try:
+        cleaned = clean_json_string(response)
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON response: {str(e)}")
+        logger.error(f"Raw response: {response}")
+        raise ValueError("Failed to parse LLM response as JSON") 
