@@ -21,7 +21,7 @@ from app.models.research_models import (
 from app.services.perplexity import PerplexityService
 from app.services.basketball_service import BasketballService
 from app.services.supabase import SupabaseService
-from app.utils.llm_utils import structured_llm_call
+from app.utils.llm_utils import structured_llm_call, json_serialize
 from app.config import get_logger
 from langfuse.decorators import observe
 
@@ -124,7 +124,9 @@ class ResearchChain:
                     "mitigation": "How to handle this risk"
                 }
             ],
-            "confidence_score": 0.8
+            "confidence_score": 0.8,
+            "deep_research_recommended": false,
+            "last_updated": "2024-02-27T23:37:45Z"
         }"""
 
         DEEP_ANALYSIS = """You are a sports betting analyst providing comprehensive research.
@@ -369,9 +371,12 @@ class ResearchChain:
             # Get analysis result
             result = await structured_llm_call(
                 prompt=prompt,
-                messages=[{"role": "user", "content": json.dumps(context)}],
+                messages=[{"role": "user", "content": json_serialize(context)}],
                 temperature=0.3
             )
+            
+            # Add current timestamp
+            result["last_updated"] = datetime.utcnow().isoformat() + "Z"
             
             # Convert to appropriate response type
             if analysis.recommended_mode == ResearchMode.DEEP:
@@ -402,7 +407,7 @@ class ResearchChain:
             # Generate conversational response
             result = await structured_llm_call(
                 prompt=self.Prompts.RESPONSE_GENERATION,
-                messages=[{"role": "user", "content": json.dumps(context)}],
+                messages=[{"role": "user", "content": json_serialize(context)}],
                 temperature=0.7  # Slightly higher temperature for more natural language
             )
             
@@ -450,8 +455,7 @@ class ResearchChain:
                 Source(
                     name=dp.source,
                     type="api" if "api" in dp.source else "web_search",
-                    timestamp=dp.timestamp,
-                    confidence=dp.confidence
+                    timestamp=dp.timestamp
                 ) for dp in data_points
             ]
 

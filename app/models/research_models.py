@@ -40,11 +40,19 @@ class QueryContext(BaseModel):
     user_preferences: Optional[Dict[str, Any]] = None
     bet_history: Optional[Dict[str, Any]] = None
 
+class ResearchContext(BaseModel):
+    """Context information for research processing"""
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    previous_queries: Optional[List[str]] = Field(default_factory=list)
+    preferences: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    bet_history: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+
 class ResearchRequest(BaseModel):
     """Main request model for the research endpoint"""
     query: str = Field(..., description="The user's sports betting query")
     mode: ResearchMode = Field(default=ResearchMode.AUTO, description="Research mode to use")
-    context: Optional[QueryContext] = Field(default=None, description="Optional query context")
+    context: Optional[ResearchContext] = Field(default=None, description="Optional research context")
 
 class QueryAnalysis(BaseModel):
     """Output of the first LLM call - Query Analysis"""
@@ -111,6 +119,20 @@ class UserPreferences(BaseModel):
     notification_preferences: Dict[str, bool]
     updated_at: datetime
 
+class BetHistory(BaseModel):
+    """Model for user betting history"""
+    id: str
+    user_id: str
+    sport: str
+    bet_type: str
+    selection: str
+    odds: float
+    stake: float
+    potential_payout: float
+    outcome: Optional[str] = None
+    placed_at: datetime
+    settled_at: Optional[datetime] = None
+
 class ResearchMetadata(BaseModel):
     """Metadata about the research process"""
     query_id: str
@@ -122,7 +144,6 @@ class ResearchMetadata(BaseModel):
 class QuickResearchResponse(BaseModel):
     """Response model for quick research mode"""
     summary: str = Field(description="Brief summary of findings")
-    key_points: List[str] = Field(description="Key betting insights")
     confidence_score: float = Field(description="Confidence in the analysis")
     deep_research_recommended: bool = Field(description="Whether deep research is recommended")
     citations: List[Citation] = Field(default=[], description="Sources cited in the research")

@@ -4,16 +4,32 @@ Utility functions for LLM operations and response processing.
 
 from typing import Dict, Any, List
 import json
+from datetime import datetime
 import logging
 import re
 from langfuse.decorators import observe
 import openai
+from openai import AsyncOpenAI
 from app.config import get_logger
 
 logger = get_logger(__name__)
 
 # Using the latest model for best performance
 MODEL = "gpt-4o-mini"
+
+# Initialize the async OpenAI client
+async_client = AsyncOpenAI()
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+def json_serialize(obj):
+    """Serialize an object to JSON, handling datetime objects"""
+    return json.dumps(obj, cls=DateTimeEncoder)
 
 @observe(name="structured_llm_call")
 async def structured_llm_call(
@@ -46,7 +62,7 @@ async def structured_llm_call(
         ]
         
         # Make the OpenAI API call
-        completion = await openai.chat.completions.create(
+        completion = await async_client.chat.completions.create(
             model=model,
             messages=full_messages,
             temperature=temperature,

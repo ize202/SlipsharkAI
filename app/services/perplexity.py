@@ -5,7 +5,7 @@ import json
 import httpx
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
-from ..models.betting_models import QueryAnalysis, SportType, Citation
+from ..models.research_models import QueryAnalysis, SportType, Citation
 from ..utils.cache import redis_cache, memory_cache
 
 # Set up logging
