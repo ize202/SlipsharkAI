@@ -19,7 +19,7 @@ from app.models.research_models import (
     DeepResearchResponse
 )
 from app.services.perplexity import PerplexityService
-from app.services.api_sports_basketball import APISportsBasketballService
+from app.services.api_sports_basketball import NBAService, NBAApiConfig
 from app.services.supabase import SupabaseService
 from app.utils.llm_utils import structured_llm_call
 from app.config import get_logger
@@ -43,21 +43,50 @@ class ResearchChain:
     def __init__(self):
         """Initialize service instances"""
         self.perplexity = PerplexityService()
-        self.sports_api = APISportsBasketballService()
+        self.nba_config = NBAApiConfig.from_env()
+        self._nba_service = None
         self.supabase = SupabaseService()
-        self._sports_api_context = None
 
-    async def _ensure_sports_api(self):
-        """Ensure sports API is initialized in async context"""
-        if not self._sports_api_context:
-            self._sports_api_context = await self.sports_api.__aenter__()
-        return self._sports_api_context
+    async def _ensure_nba_service(self):
+        """Ensure NBA service is initialized in async context"""
+        if not self._nba_service:
+            self._nba_service = NBAService(self.nba_config)
+            await self._nba_service.__aenter__()
+        return self._nba_service
 
-    async def _cleanup_sports_api(self):
-        """Cleanup sports API context if initialized"""
-        if self._sports_api_context:
-            await self.sports_api.__aexit__(None, None, None)
-            self._sports_api_context = None
+    async def _cleanup_nba_service(self):
+        """Cleanup NBA service if initialized"""
+        if self._nba_service:
+            await self._nba_service.__aexit__(None, None, None)
+            self._nba_service = None
+
+    def _determine_season(self, analysis: QueryAnalysis) -> str:
+        """
+        Determine the NBA season to use based on query analysis and current date.
+        
+        NBA seasons span two calendar years (e.g., 2023-2024 season is referred to as "2023").
+        The season typically starts in October and ends in June of the following year.
+        """
+        # Check if a specific season/year was mentioned in the query
+        if analysis.game_date:
+            try:
+                # Extract year from date
+                date_obj = datetime.strptime(analysis.game_date, "%Y-%m-%d")
+                # If date is between July and December, use that year
+                # If date is between January and June, use previous year
+                year = date_obj.year if date_obj.month > 6 else date_obj.year - 1
+                return str(year)
+            except (ValueError, TypeError):
+                # If date parsing fails, fall back to current season
+                pass
+        
+        # Default: determine current season based on today's date
+        current_date = datetime.now()
+        # If current month is between July and December, use current year
+        # If current month is between January and June, use previous year
+        current_season = current_date.year if current_date.month > 6 else current_date.year - 1
+        
+        return str(current_season)
 
     # Prompts moved to a separate section for better organization
     class Prompts:
@@ -71,6 +100,7 @@ class ResearchChain:
         5. Any specific odds or lines mentioned
         6. Timeframe (when the game is)
         7. Any specific matchups or aspects of interest
+        8. Season or year mentioned (e.g., "2022-2023 season" or "last season")
         
         Also determine if this query requires:
         - Quick Research: Basic odds and recent performance
@@ -88,6 +118,7 @@ class ResearchChain:
             "bet_type": "spread",  // or appropriate bet type
             "odds_mentioned": "-5.5",  // if any odds are mentioned
             "game_date": "2024-02-24",  // if mentioned
+            "season_mentioned": "2023",  // if a specific season is mentioned (use starting year)
             "matchup_focus": "specific matchup or aspect of interest",
             "required_data": ["team_stats", "player_stats", "odds"],
             "recommended_mode": "quick",  // or "deep"
@@ -217,6 +248,10 @@ class ResearchChain:
         data_points: List[DataPoint] = []
         tasks = []
 
+        # Determine which NBA season to use
+        nba_season = self._determine_season(analysis)
+        logger.info(f"Using NBA season: {nba_season}")
+
         # Always start with web search
         tasks.append(self.perplexity.quick_research(
             query=analysis.raw_query,
@@ -226,58 +261,175 @@ class ResearchChain:
         # For deep research, add additional data sources
         if analysis.recommended_mode == ResearchMode.DEEP:
             if analysis.sport_type == SportType.BASKETBALL:
-                # Initialize sports API context
-                await self._ensure_sports_api()
+                # Initialize NBA service
+                nba = await self._ensure_nba_service()
                 
-                # Add sports API tasks for each team
-                for team in analysis.teams.values():
-                    if team:
-                        tasks.extend([
-                            self.sports_api.get_team_stats(team),
-                            self.sports_api.get_player_stats(team),
-                            self.sports_api.get_upcoming_games(team)
-                        ])
-                
-                # Add user data if context is available
-                if request.context and request.context.user_id:
-                    tasks.extend([
-                        self.supabase.get_user_bets(
-                            request.context.user_id,
-                            sport="basketball",
-                            days_back=30
-                        ),
-                        self.supabase.get_user_stats(
-                            request.context.user_id,
-                            sport="basketball"
-                        ),
-                        self.supabase.get_similar_bets(
-                            sport="basketball",
-                            bet_type=analysis.bet_type if analysis.bet_type else "any",
-                            days_back=30
-                        )
-                    ])
+                try:
+                    # Get teams data
+                    teams = await nba.teams.list_teams()
+                    team_map = {t.name.lower(): t for t in teams}
+                    
+                    # Process each mentioned team
+                    for team_name in analysis.teams.values():
+                        if not team_name:
+                            continue
+                            
+                        team = team_map.get(team_name.lower())
+                        if not team:
+                            # Try with nickname
+                            team = next((t for t in teams if t.nickname.lower() == team_name.lower()), None)
+                            
+                        if not team:
+                            logger.warning(f"Team not found: {team_name}")
+                            data_points.append(DataPoint(
+                                source="team_lookup",
+                                content={"error": f"Team not found: {team_name}"},
+                                timestamp=datetime.utcnow(),
+                                confidence=0.5
+                            ))
+                            continue
 
-        try:
-            # Execute all tasks in parallel
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+                        # Gather comprehensive team data
+                        team_tasks = [
+                            # Team stats
+                            nba.teams.get_team_statistics(team.id, season=nba_season),
+                            # Standings
+                            nba.standings.get_standings("standard", nba_season, team.id),
+                            # Recent and upcoming games
+                            nba.games.list_games(season=nba_season, team_id=team.id)
+                        ]
+                        
+                        # Execute team tasks
+                        team_results = await asyncio.gather(*team_tasks, return_exceptions=True)
+                        
+                        # Process team results
+                        team_data = {
+                            "team_info": team.model_dump(),
+                            "statistics": team_results[0].model_dump() if not isinstance(team_results[0], Exception) else {"error": str(team_results[0])},
+                            "standings": [s.model_dump() for s in team_results[1]] if not isinstance(team_results[1], Exception) else {"error": str(team_results[1])},
+                            "games": [g.model_dump() for g in team_results[2]] if not isinstance(team_results[2], Exception) else {"error": str(team_results[2])}
+                        }
+                        
+                        data_points.append(DataPoint(
+                            source=f"team_data_{team.name}",
+                            content=team_data,
+                            timestamp=datetime.utcnow(),
+                            confidence=0.9
+                        ))
+                        
+                        # Get players for this team
+                        try:
+                            players = await nba.players.get_players(season=nba_season, team_id=team.id)
+                            
+                            # Get stats for key players (limit to 5 to avoid too many API calls)
+                            for player in players[:5]:
+                                try:
+                                    player_stats = await nba.players.get_player_statistics(
+                                        player_id=player.id,
+                                        team_id=team.id,
+                                        season=nba_season
+                                    )
+                                    
+                                    data_points.append(DataPoint(
+                                        source=f"player_data_{player.firstname}_{player.lastname}",
+                                        content={
+                                            "player_info": player.model_dump(),
+                                            "statistics": [s.model_dump() for s in player_stats]
+                                        },
+                                        timestamp=datetime.utcnow(),
+                                        confidence=0.8
+                                    ))
+                                except Exception as e:
+                                    logger.error(f"Error getting stats for player {player.firstname} {player.lastname}: {str(e)}")
+                        except Exception as e:
+                            logger.error(f"Error getting players for team {team.name}: {str(e)}")
+
+                    # Add player-specific queries if players mentioned
+                    for player_name in analysis.players:
+                        try:
+                            players = await nba.players.get_players(season=nba_season, search=player_name)
+                            
+                            if players:
+                                player = players[0]  # Take the first match
+                                player_stats = await nba.players.get_player_statistics(
+                                    player_id=player.id,
+                                    season=nba_season
+                                )
+                                
+                                data_points.append(DataPoint(
+                                    source=f"player_search_{player_name}",
+                                    content={
+                                        "player_info": player.model_dump(),
+                                        "statistics": [s.model_dump() for s in player_stats]
+                                    },
+                                    timestamp=datetime.utcnow(),
+                                    confidence=0.8
+                                ))
+                            else:
+                                data_points.append(DataPoint(
+                                    source=f"player_search_{player_name}",
+                                    content={"error": f"Player not found: {player_name}"},
+                                    timestamp=datetime.utcnow(),
+                                    confidence=0.5
+                                ))
+                        except Exception as e:
+                            logger.error(f"Error searching for player {player_name}: {str(e)}")
+
+                    # Add user data if context available
+                    if request.context and request.context.user_id:
+                        user_tasks = [
+                            self.supabase.get_user_bets(
+                                request.context.user_id,
+                                sport="basketball",
+                                days_back=30
+                            ),
+                            self.supabase.get_user_stats(
+                                request.context.user_id,
+                                sport="basketball"
+                            ),
+                            self.supabase.get_similar_bets(
+                                sport="basketball",
+                                bet_type=analysis.bet_type if analysis.bet_type else "any",
+                                days_back=30
+                            )
+                        ]
+                        
+                        # Execute user data tasks
+                        user_results = await asyncio.gather(*user_tasks, return_exceptions=True)
+                        
+                        # Process user results
+                        for i, result in enumerate(user_results):
+                            if isinstance(result, Exception):
+                                logger.error(f"Error in user data task {i}: {str(result)}")
+                            else:
+                                source_name = ["user_bets", "user_stats", "similar_bets"][i]
+                                data_points.append(DataPoint(
+                                    source=source_name,
+                                    content=result,
+                                    timestamp=datetime.utcnow(),
+                                    confidence=0.7
+                                ))
+                except Exception as e:
+                    logger.error(f"Error in NBA data gathering: {str(e)}", exc_info=True)
+                finally:
+                    # Always cleanup NBA service
+                    await self._cleanup_nba_service()
             
-            # Process results
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"Error in data gathering task {i}: {str(result)}")
-                else:
-                    content = result.model_dump() if hasattr(result, 'model_dump') else result
-                    data_points.append(DataPoint(
-                        source=f"task_{i}",
-                        content=content,
-                        timestamp=datetime.utcnow(),
-                        confidence=0.9
-                    ))
+        # Execute web search task
+        try:
+            web_result = await tasks[0]
+            if web_result:
+                content = web_result.model_dump() if hasattr(web_result, 'model_dump') else web_result
+                data_points.append(DataPoint(
+                    source="web_search",
+                    content=content,
+                    timestamp=datetime.utcnow(),
+                    confidence=0.8
+                ))
+        except Exception as e:
+            logger.error(f"Error in web search: {str(e)}")
 
-            return data_points
-        finally:
-            # Always cleanup sports API context after use
-            await self._cleanup_sports_api()
+        return data_points
 
     @observe(name="analyze_data")
     async def _analyze_data(

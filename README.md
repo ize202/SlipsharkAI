@@ -1,153 +1,122 @@
 # Sports Betting Research Assistant
 
-A prompt chaining workflow for a sports betting research assistant that analyzes user queries, integrates external data sources, and generates informed betting insights.
+A sophisticated AI-powered research assistant for sports betting analysis, leveraging LLM-based prompt chaining and multiple data sources.
 
-## Features
+## System Architecture
 
-- **Query Analysis**: Extracts intent, entities, and required data sources from user queries
-- **Two-Tier Research**:
-  - **Quick Research**: Fast, web-based insights using Perplexity AI
-  - **Deep Research**: Comprehensive analysis using multiple data sources
-- **Data Integration**:
-  - Sports data from Goalserve API
-  - Web search via Perplexity AI
-  - User history from Supabase
-- **Robust Caching**: Redis-based caching with in-memory fallback
-- **Observability**: Integrated with Langfuse for tracing and monitoring
+### Research Chain Workflow
 
-## Setup
-
-### Prerequisites
-
-- Python 3.11+
-- Redis (optional, but recommended)
-- Docker and Docker Compose (for containerized setup)
-
-### Environment Variables
-
-Create a `.env` file or use the provided `setup_env.sh` script:
-
-```bash
-# Source the environment setup script
-source setup_env.sh dev  # Options: dev, staging, prod
+```mermaid
+graph TD
+    A[User Query] --> B[LLM Call 1: Query Analyzer]
+    B --> C{Mode Decision}
+    C -->|Quick Research| D1[Web Search Only]
+    C -->|Deep Research| D2[Web Search + Sports API + User Data]
+    D1 --> E[LLM Call 2: Analysis]
+    D2 --> E
+    E --> F[LLM Call 3: Response Generation]
+    F --> G[Return Response to User]
 ```
 
-Required environment variables:
+### Mode Selection Logic
 
-```
-OPENAI_API_KEY=your-openai-api-key
-PERPLEXITY_API_KEY=your-perplexity-api-key
-GOALSERVE_API_KEY=your-goalserve-api-key
-LANGFUSE_PUBLIC_KEY=your-langfuse-public-key
-LANGFUSE_SECRET_KEY=your-langfuse-secret-key
-REDIS_URL=redis://localhost:6379  # Optional, but recommended
-SUPABASE_URL=your-supabase-url    # Optional for development
-SUPABASE_KEY=your-supabase-key    # Optional for development
-```
+The system automatically determines the appropriate research mode based on query complexity:
 
-### Local Development
+#### Quick Research Mode
+- Simple queries (e.g., "What's the spread for Lakers game tonight?")
+- Current basic information requests
+- Single data point lookups
+- Data Sources: Web Search
 
-#### Option 1: Using Docker Compose
+#### Deep Research Mode
+- Complex queries requiring multiple data points
+- Historical analysis requests
+- Queries mentioning trends/stats/standings
+- Multiple team/player comparisons
+- Data Sources: Web Search + Sports API + User History
 
-```bash
-# Start all services
-docker-compose up -d
+### Core Components
 
-# View logs
-docker-compose logs -f
+1. **Query Analysis (LLM Call 1)**
+   - Intent detection
+   - Entity extraction
+   - Mode determination
+   - Data requirement analysis
 
-# Stop all services
-docker-compose down
-```
+2. **Data Gathering**
+   - Web search via Perplexity AI
+   - Sports API integration
+   - User history from database
+   - Parallel data fetching
 
-Redis Commander will be available at http://localhost:8081 for monitoring Redis.
+3. **Analysis (LLM Call 2)**
+   - Data synthesis
+   - Pattern recognition
+   - Risk assessment
+   - Confidence scoring
 
-#### Option 2: Manual Setup
+4. **Response Generation (LLM Call 3)**
+   - Natural language formatting
+   - Insight prioritization
+   - Citation inclusion
+   - Recommendation generation
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+## Technical Stack
 
-# Start Redis (if not using Docker)
-redis-server
+- **Framework**: FastAPI
+- **Database**: Supabase (PostgreSQL)
+- **LLM Integration**: OpenAI GPT-4
+- **External APIs**:
+  - Perplexity AI (Web Search)
+  - Sports API (Stats & Odds)
+  - Supabase (User Data)
+- **Observability**: Langfuse
 
-# Start the API server
-uvicorn app.api:app --reload
-```
+## Key Features
 
-### Production Deployment
+- Dual-mode research capability (Quick/Deep)
+- Async/parallel data gathering
+- Structured data analysis
+- Natural language responses
+- User context integration
+- Comprehensive error handling
+- Request tracing and logging
 
-#### Using Docker
+## Development Guidelines
 
-```bash
-# Build the Docker image
-docker build -t sports-betting-assistant .
+1. **Code Organization**
+   - Clear separation of concerns
+   - Modular service architecture
+   - Type-safe interfaces
+   - Comprehensive error handling
 
-# Run the container
-docker run -d -p 8000:8000 \
-  --env-file .env.prod \
-  --name sports-betting-assistant \
-  sports-betting-assistant
-```
+2. **Performance**
+   - Async operations
+   - Parallel data gathering
+   - Response caching
+   - Resource cleanup
 
-#### Using Docker Compose
+3. **Reliability**
+   - Graceful degradation
+   - Fallback mechanisms
+   - Comprehensive logging
+   - Request tracing
 
-```bash
-# Set environment to production
-export COMPOSE_FILE=docker-compose.prod.yml
+4. **Security**
+   - API key management
+   - Rate limiting
+   - Input validation
+   - Error sanitization
 
-# Start services
-docker-compose up -d
-```
+## Getting Started
 
-## API Usage
-
-### Analyze a Query
-
-```bash
-curl -X POST http://localhost:8000/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Should I bet on the Lakers to cover the spread against the Warriors?", "force_deep_research": true}'
-```
-
-## Architecture
-
-The system follows a prompt chaining workflow:
-
-1. **Query Analysis**: Extracts intent, entities, and required data sources
-2. **Research Path Selection**: Determines whether to use quick or deep research
-3. **Data Collection**: Gathers data from multiple sources in parallel
-4. **Analysis**: Processes collected data to generate insights
-5. **Response Generation**: Creates a natural, conversational response
-
-## Caching Strategy
-
-- **Redis**: Primary caching mechanism with configurable TTLs
-- **In-Memory Fallback**: Automatic fallback when Redis is unavailable
-- **TTL Configuration**: Different TTLs for different types of data:
-  - Team IDs: 24 hours
-  - Team stats: 1 hour
-  - Player stats: 1 hour
-  - Injuries: 2 hours
-  - Upcoming games: 30 minutes
-  - Live scores: 1 minute
-
-## Observability
-
-The system is integrated with Langfuse for observability:
-
-- **Traces**: Each function is decorated with `@observe`
-- **Metrics**: Performance metrics are collected automatically
-- **Logs**: Structured logging is used throughout
+[Installation and setup instructions to be added]
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -am 'Add my feature'`
-4. Push to the branch: `git push origin feature/my-feature`
-5. Submit a pull request
+[Contribution guidelines to be added]
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+[License information to be added]
+
