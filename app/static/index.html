@@ -162,6 +162,11 @@
                         Force Deep Research (slower but more comprehensive)
                     </label>
                 </div>
+                <div class="mb-3">
+                    <label for="apiKeyInput" class="form-label">API Key (for development testing)</label>
+                    <input type="text" class="form-control" id="apiKeyInput" placeholder="Enter your API key">
+                    <div class="form-text">This is only needed for development and testing.</div>
+                </div>
                 <button type="button" class="btn btn-primary" id="researchBtn">Research</button>
             </div>
         </div>
@@ -369,7 +374,8 @@
                     const response = await fetchWithConversationalResponse(apiUrl, {
                         method: 'POST',
                         headers: {
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'X-API-Key': document.getElementById('apiKeyInput').value
                         },
                         body: JSON.stringify({
                             query: query,
@@ -425,7 +431,8 @@
                     const response = await fetchWithConversationalResponse(extendUrl, {
                         method: 'POST',
                         headers: {
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'X-API-Key': document.getElementById('apiKeyInput').value
                         },
                         body: JSON.stringify({
                             original_query: originalQuery,
