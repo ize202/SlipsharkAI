@@ -21,7 +21,7 @@ from app.models.research_models import (
 from app.services.perplexity import PerplexityService
 from app.services.api_sports_basketball import APISportsBasketballService
 from app.services.supabase import SupabaseService
-from app.functions.llm_functions import structured_llm_call, raw_llm_call, generate_final_response
+from app.utils.llm_utils import structured_llm_call, raw_llm_call
 from app.config import get_logger
 from langfuse.decorators import observe
 
