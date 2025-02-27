@@ -9,7 +9,7 @@ from langfuse import Langfuse
 import openai
 from ..config.langfuse_init import langfuse  # Use the initialized Langfuse instance
 from ..services.perplexity import PerplexityService, PerplexityResponse
-from ..services.goalserve import GoalserveNBAService
+from ..services.api_sports_basketball import APISportsBasketballService
 from ..services.supabase import SupabaseService
 
 from ..models.betting_models import (
@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 # Using the latest model for best performance
 model = "gpt-4o-mini"
+
+# ... existing code ... 
 
 @observe(name="analyze_query")
 async def analyze_query(user_input: str) -> QueryAnalysis:
@@ -259,12 +261,13 @@ def should_recommend_deep_research(result: PerplexityResponse) -> bool:
     return has_many_citations or has_related_questions or content_length > 200
 
 @observe(name="deep_research")
-async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> DeepResearchResult:
+async def deep_research(query: QueryAnalysis, data_points: Optional[List[DataPoint]] = None, user_id: Optional[str] = None) -> DeepResearchResult:
     """
     Perform comprehensive research using multiple data sources
     
     Args:
         query: Analyzed query containing sport type and other metadata
+        data_points: Optional pre-gathered data points, if None or empty will gather data internally
         user_id: Optional user ID for personalized insights
         
     Returns:
@@ -273,320 +276,183 @@ async def deep_research(query: QueryAnalysis, user_id: Optional[str] = None) -> 
     logger.info(f"Starting deep research for {query.sport_type}")
     
     try:
-        # Get team names from the query analysis
-        teams = [team for team in query.teams.values() if team]  # Filter out empty team names
-        if not teams:
-            # Fallback for when no teams are specified - use a generic basketball query
-            logger.warning("No teams found in query analysis, using generic basketball research")
-            teams = ["NBA"]
-        
-        # Initialize services
-        perplexity = PerplexityService()
-        goalserve = GoalserveNBAService()
-        supabase = SupabaseService()
-        
-        # Gather data from all sources in parallel
-        data_points = []
-        async with perplexity, goalserve:
-            # Define all the tasks we want to run in parallel
-            tasks = []
-            task_metadata = []  # Store metadata about each task for better error handling
+        # If data_points were not provided or empty, gather them
+        if data_points is None or len(data_points) == 0:
+            # Get team names from the query analysis
+            teams = [team for team in query.teams.values() if team]  # Filter out empty team names
+            if not teams:
+                # Fallback for when no teams are specified - use a generic basketball query
+                logger.warning("No teams found in query analysis, using generic basketball research")
+                teams = ["NBA"]
             
-            # Add Perplexity tasks for general research regardless of team specificity
-            tasks.append(
-                perplexity.quick_research(
-                    query=f"Latest basketball betting information for {query.raw_query}",
-                    search_recency="day"
-                )
-            )
-            task_metadata.append({
-                "type": "perplexity_research",
-                "description": "General basketball betting information",
-                "critical": False  # This task is not critical, we can proceed without it
-            })
+            # Initialize services
+            perplexity = PerplexityService()
+            basketball = APISportsBasketballService()
+            supabase = SupabaseService()
             
-            # Add tasks for each team
-            for team in teams:
-                if team != "NBA":  # Skip team-specific queries for generic NBA
-                    # Add Perplexity search for this team regardless of Goalserve availability
-                    # This ensures we always have some data even if Goalserve fails
-                    tasks.append(
-                        perplexity.quick_research(
-                            query=f"Latest news, injuries, and betting trends for {team}",
-                            search_recency="day"
-                        )
-                    )
-                    task_metadata.append({
-                        "type": "perplexity_team_research",
-                        "team": team,
-                        "description": f"Team-specific news and trends for {team}",
-                        "critical": False
-                    })
-                    
-                    # Try to get team-specific data from Goalserve
-                    try:
-                        # Try to get team ID first to validate the team exists
-                        team_id = goalserve.get_team_id(team)
-                        if team_id:
-                            # Add Goalserve NBA data tasks
-                            tasks.append(goalserve.get_team_stats(team))
-                            task_metadata.append({
-                                "type": "goalserve_team_stats",
-                                "team": team,
-                                "description": f"Team statistics for {team}",
-                                "critical": False
-                            })
-                            
-                            tasks.append(goalserve.get_player_stats(team))
-                            task_metadata.append({
-                                "type": "goalserve_player_stats",
-                                "team": team,
-                                "description": f"Player statistics for {team}",
-                                "critical": False
-                            })
-                            
-                            tasks.append(goalserve.get_injuries(team))
-                            task_metadata.append({
-                                "type": "goalserve_injuries",
-                                "team": team,
-                                "description": f"Injury reports for {team}",
-                                "critical": False
-                            })
-                    except Exception as e:
-                        logger.warning(f"Could not add team-specific Goalserve tasks for {team}: {str(e)}")
-                        # We already added the Perplexity fallback above, so no need to add it again
-            
-            # Add common tasks
-            try:
-                tasks.append(goalserve.get_upcoming_games(teams[0]))
-                task_metadata.append({
-                    "type": "goalserve_upcoming_games",
-                    "description": "Upcoming NBA games",
-                    "critical": False
-                })
-            except Exception as e:
-                logger.warning(f"Could not add upcoming games task: {str(e)}")
-                # Add a fallback Perplexity search for upcoming games
+            # Gather data from all sources in parallel
+            data_points = []
+            async with perplexity, basketball:
+                # Define all the tasks we want to run in parallel
+                tasks = []
+                task_metadata = []  # Store metadata about each task for better error handling
+                
+                # Add Perplexity tasks for general research regardless of team specificity
                 tasks.append(
                     perplexity.quick_research(
-                        query=f"Upcoming NBA games schedule for {teams[0]}",
+                        query=f"Latest basketball betting information for {query.raw_query}",
                         search_recency="day"
                     )
                 )
                 task_metadata.append({
-                    "type": "perplexity_upcoming_games",
-                    "description": "Upcoming NBA games (fallback)",
-                    "critical": False
+                    "type": "perplexity_research",
+                    "description": "General basketball betting information",
+                    "critical": False  # This task is not critical, we can proceed without it
                 })
-            
-            # Add user history tasks if user_id is provided
-            if user_id:
-                try:
-                    tasks.append(supabase.get_user_bets(user_id, sport="basketball", days_back=30))
-                    task_metadata.append({
-                        "type": "supabase_user_bets",
-                        "description": "User's recent basketball bets",
-                        "critical": False
-                    })
-                    
-                    tasks.append(supabase.get_user_stats(user_id, sport="basketball"))
-                    task_metadata.append({
-                        "type": "supabase_user_stats",
-                        "description": "User's basketball betting statistics",
-                        "critical": False
-                    })
-                    
-                    tasks.append(
-                        supabase.get_similar_bets(
-                            sport="basketball",
-                            bet_type=query.bet_type if query.bet_type else "any",
-                            days_back=30
+                
+                # Add tasks for each team
+                for team in teams:
+                    if team != "NBA":  # Skip team-specific queries for generic NBA
+                        # Add Perplexity search for this team regardless of API-Sports availability
+                        # This ensures we always have some data even if API-Sports fails
+                        tasks.append(
+                            perplexity.quick_research(
+                                query=f"Latest news, injuries, and betting trends for {team}",
+                                search_recency="day"
+                            )
                         )
-                    )
+                        task_metadata.append({
+                            "type": "perplexity_team_research",
+                            "team": team,
+                            "description": f"Team-specific news and trends for {team}",
+                            "critical": False
+                        })
+                        
+                        # Try to get team-specific data from API-Sports
+                        try:
+                            # Try to get team ID first to validate the team exists
+                            team_id = basketball.get_team_id(team)
+                            if team_id:
+                                # Add API-Sports NBA data tasks
+                                tasks.append(basketball.get_team_stats(team))
+                                task_metadata.append({
+                                    "type": "api_sports_team_stats",
+                                    "team": team,
+                                    "description": f"Team statistics for {team}",
+                                    "critical": False
+                                })
+                                
+                                tasks.append(basketball.get_player_stats(team))
+                                task_metadata.append({
+                                    "type": "api_sports_player_stats",
+                                    "team": team,
+                                    "description": f"Player statistics for {team}",
+                                    "critical": False
+                                })
+                                
+                                # Note: API-Sports doesn't have a direct injuries endpoint,
+                                # so we'll rely on Perplexity for injury information
+                        except Exception as e:
+                            logger.warning(f"Could not add team-specific API-Sports tasks for {team}: {str(e)}")
+                            # We already added the Perplexity fallback above, so no need to add it again
+                
+                # Add common tasks
+                try:
+                    tasks.append(basketball.get_upcoming_games(teams[0]))
                     task_metadata.append({
-                        "type": "supabase_similar_bets",
-                        "description": "Similar basketball bets",
+                        "type": "api_sports_upcoming_games",
+                        "description": "Upcoming NBA games",
                         "critical": False
                     })
                 except Exception as e:
-                    logger.warning(f"Could not add user history tasks: {str(e)}")
-            
-            # Execute all tasks in parallel
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results and handle any exceptions
-            successful_tasks = 0
-            failed_tasks = 0
-            
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    failed_tasks += 1
-                    task_info = task_metadata[i] if i < len(task_metadata) else {"description": f"Task {i}"}
-                    logger.error(f"Error in {task_info['description']}: {str(result)}")
-                    
-                    # For critical tasks, we might want to raise an exception
-                    if i < len(task_metadata) and task_metadata[i].get("critical", False):
-                        raise ValueError(f"Critical task failed: {task_info['description']}")
-                else:
-                    successful_tasks += 1
-                    # Add successful results to data points
-                    if result:
-                        task_info = task_metadata[i] if i < len(task_metadata) else {"type": f"task_{i}"}
-                        data_points.append(DataPoint(
-                            source=task_info.get("type", tasks[i].__qualname__),
-                            content=result.model_dump() if hasattr(result, 'model_dump') else str(result)
-                        ))
-            
-            logger.info(f"Completed {successful_tasks} tasks successfully, {failed_tasks} tasks failed")
-            
-            # Check if we have enough data to proceed
-            if len(data_points) == 0:
-                logger.error("No data points were collected, cannot proceed with analysis")
-                raise ValueError("Failed to collect any data for analysis")
+                    logger.warning(f"Could not add upcoming games task: {str(e)}")
+                    # Add a fallback Perplexity search for upcoming games
+                    tasks.append(
+                        perplexity.quick_research(
+                            query=f"Upcoming NBA games schedule for {teams[0]}",
+                            search_recency="day"
+                        )
+                    )
+                    task_metadata.append({
+                        "type": "perplexity_upcoming_games",
+                        "description": "Upcoming NBA games (fallback)",
+                        "critical": False
+                    })
+                
+                # Add user history tasks if user_id is provided
+                if user_id:
+                    try:
+                        tasks.append(supabase.get_user_bets(user_id, sport="basketball", days_back=30))
+                        task_metadata.append({
+                            "type": "supabase_user_bets",
+                            "description": "User's recent basketball bets",
+                            "critical": False
+                        })
+                        
+                        tasks.append(supabase.get_user_stats(user_id, sport="basketball"))
+                        task_metadata.append({
+                            "type": "supabase_user_stats",
+                            "description": "User's basketball betting statistics",
+                            "critical": False
+                        })
+                        
+                        tasks.append(
+                            supabase.get_similar_bets(
+                                sport="basketball",
+                                bet_type=query.bet_type if query.bet_type else "any",
+                                days_back=30
+                            )
+                        )
+                        task_metadata.append({
+                            "type": "supabase_similar_bets",
+                            "description": "Similar basketball bets",
+                            "critical": False
+                        })
+                    except Exception as e:
+                        logger.warning(f"Could not add user history tasks: {str(e)}")
+                
+                # Execute all tasks in parallel
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Process results and handle any exceptions
+                successful_tasks = 0
+                failed_tasks = 0
+                
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        failed_tasks += 1
+                        task_info = task_metadata[i] if i < len(task_metadata) else {"description": f"Task {i}"}
+                        logger.error(f"Error in {task_info['description']}: {str(result)}")
+                        
+                        # For critical tasks, we might want to raise an exception
+                        if i < len(task_metadata) and task_metadata[i].get("critical", False):
+                            raise ValueError(f"Critical task failed: {task_info['description']}")
+                    else:
+                        successful_tasks += 1
+                        # Add successful results to data points
+                        if result:
+                            task_info = task_metadata[i] if i < len(task_metadata) else {"type": f"task_{i}"}
+                            data_points.append(DataPoint(
+                                source=task_info.get("type", tasks[i].__qualname__),
+                                content=result.model_dump() if hasattr(result, 'model_dump') else str(result)
+                            ))
+                
+                logger.info(f"Completed {successful_tasks} tasks successfully, {failed_tasks} tasks failed")
+        
+        # Check if we have enough data to proceed
+        if len(data_points) == 0:
+            logger.error("No data points were collected, cannot proceed with analysis")
+            raise ValueError("Failed to collect any data for analysis")
         
         # Combine all data into a coherent context for the LLM
         context = create_analysis_context(query, data_points)
         
-        # Use GPT-4o-mini to analyze the data
-        messages = [
-            {
-                "role": "system",
-                "content": """You are an expert sports betting analyst specializing in NBA betting analysis.
-                Analyze the provided data and generate comprehensive betting insights.
-                Focus on:
-                1. Current odds and line movements
-                2. Team performance metrics and trends
-                3. Player availability and impact
-                4. Historical betting patterns
-                5. Risk factors and confidence level
-                
-                IMPORTANT: Return ONLY a raw JSON object matching the DeepResearchResult model with the following structure:
-                {
-                    "summary": "Brief executive summary of the analysis",
-                    "insights": [
-                        {
-                            "category": "odds",  // Category can be: odds, performance, injury, etc.
-                            "insight": "Key insight about the betting opportunity",
-                            "impact": "How this affects betting decisions",
-                            "confidence": 0.85,  // Float between 0 and 1
-                            "supporting_data": ["Data point 1", "Data point 2"]  // Optional
-                        }
-                    ],
-                    "risk_factors": [
-                        {
-                            "factor": "Description of the risk factor",
-                            "severity": "high",  // Must be: "low", "medium", or "high"
-                            "mitigation": "Possible ways to mitigate this risk"  // Optional
-                        }
-                    ],
-                    "recommended_bet": "Recommended betting action based on analysis",
-                    "odds_analysis": {
-                        "current_line": null,  // Use actual odds data if available, otherwise null
-                        "line_movement": "unknown",  // Use actual data: "up", "down", "stable", or "unknown"
-                        "market_sentiment": "unknown"  // Use actual data: "favoring_over", "favoring_under", "balanced", or "unknown"
-                    },
-                    "historical_context": "Relevant historical betting patterns and trends",
-                    "confidence_score": 0.75,  // Float between 0 and 1
-                    "citations": [
-                        // IMPORTANT: Only include citations if you have actual source information from the data.
-                        // If no source information is available, return an empty array: []
-                        // DO NOT use example.com or placeholder URLs.
-                        // If you have information from news sources, use the actual source name and URL if available.
-                        // Example of a good citation:
-                        {
-                            "url": "https://www.espn.com/nba/story/_/id/12345/lakers-injury-report",
-                            "title": "Lakers Injury Report: Latest Updates",
-                            "snippet": "LeBron James is listed as questionable for tonight's game.",
-                            "published_date": null
-                        }
-                    ],
-                    "last_updated": null  // Will be set to current time
-                }
-                
-                DO NOT wrap the JSON in markdown code blocks or any other formatting.
-                DO NOT include any explanatory text before or after the JSON.
-                The JSON should start with { and end with } with no other characters.
-                ENSURE all required fields are present and properly formatted.
-                For risk_factors, severity MUST be one of: "low", "medium", or "high" as a string.
-                
-                CRITICAL: DO NOT HALLUCINATE DATA. If specific data (like odds, lines, or statistics) is not available in the provided context:
-                1. Use null for numeric values
-                2. Use "unknown" or "unavailable" for string values
-                3. Clearly indicate in insights when information is limited or unavailable
-                4. Reduce confidence scores appropriately when working with limited data
-                5. NEVER invent specific odds, lines, or statistics."""
-            },
-            {"role": "user", "content": context}
-        ]
-        
-        # The new OpenAI client doesn't use await with create()
-        completion = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.2  # Lower temperature for more focused analysis
-        )
+        # Use GPT-4o-mini to analyze the data and return the result
+        return await generate_analysis_result(context)
 
-        # Parse the LLM response into our result model
-        analysis = completion.choices[0].message.content
-        
-        # Clean the JSON response
-        # Remove any markdown code block markers and whitespace
-        cleaned_json = analysis.strip()
-        if cleaned_json.startswith("```"):
-            cleaned_json = cleaned_json.split("```")[1]
-        if cleaned_json.startswith("json"):
-            cleaned_json = cleaned_json[4:]
-        cleaned_json = cleaned_json.strip()
-        
-        try:
-            # Parse the JSON into a dictionary first
-            result_dict = json.loads(cleaned_json)
-            
-            # Ensure last_updated is a string with the current time
-            result_dict["last_updated"] = datetime.now(UTC).isoformat()
-                
-            # Convert back to JSON and validate
-            return DeepResearchResult.model_validate(result_dict)
-        except Exception as e:
-            logger.error(f"Error parsing JSON response: {cleaned_json}")
-            logger.error(f"Validation error: {str(e)}")
-            
-            # Create a fallback response with minimal data
-            fallback_response = {
-                "summary": f"Analysis of {query.raw_query} (limited data available)",
-                "insights": [
-                    {
-                        "category": "data_limitation",
-                        "insight": "Limited data available for this query",
-                        "impact": "Unable to provide comprehensive analysis at this time",
-                        "confidence": 0.3,
-                        "supporting_data": []
-                    }
-                ],
-                "risk_factors": [
-                    {
-                        "factor": "Insufficient data for reliable analysis",
-                        "severity": "high",
-                        "mitigation": "Try a more specific query or check back later"
-                    }
-                ],
-                "recommended_bet": "Unable to make a recommendation with the available data",
-                "odds_analysis": {
-                    "current_line": None,
-                    "line_movement": "unknown",
-                    "market_sentiment": "unknown"
-                },
-                "historical_context": "No historical context available",
-                "confidence_score": 0.3,
-                "citations": [],
-                "last_updated": datetime.now(UTC).isoformat()
-            }
-            
-            return DeepResearchResult.model_validate(fallback_response)
-            
     except Exception as e:
-        logger.error(f"Error in deep_research: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Error in deep research: {str(e)}", exc_info=True)
+        raise ValueError("Error performing deep research") from e
 
 def create_analysis_context(query: QueryAnalysis, data_points: List[DataPoint]) -> str:
     """Create a structured context for the LLM to analyze"""
@@ -653,6 +519,163 @@ def create_analysis_context(query: QueryAnalysis, data_points: List[DataPoint]) 
     """
     
     return str(organized_data)  # Convert to string for LLM input
+
+@observe(name="generate_analysis_result")
+async def generate_analysis_result(context: str) -> DeepResearchResult:
+    """
+    Use the LLM to analyze the collected data and generate insights.
+    
+    Args:
+        context: Structured context containing all collected data
+        
+    Returns:
+        DeepResearchResult with comprehensive analysis
+    """
+    logger.info("Generating deep analysis from collected data")
+    
+    try:
+        # Create a system prompt that guides the model to analyze the data
+        system_prompt = """You are a professional sports betting analyst.
+        Your task is to analyze the provided data and generate comprehensive betting insights.
+        
+        Guidelines:
+        1. Focus on the specific query and sport mentioned
+        2. Analyze all available data sources (odds, team stats, player stats, injuries, news)
+        3. Identify key trends, matchups, and factors that could influence betting outcomes
+        4. Assess the strength of different betting options
+        5. Provide a confidence score for each insight
+        6. Identify potential risk factors
+        
+        CRITICAL DATA INTEGRITY RULES:
+        1. NEVER invent or hallucinate specific odds, lines, statistics, or other numerical values
+        2. If specific data is not available, clearly state this limitation
+        3. Use phrases like "odds data isn't available" or "we don't have current line information" when appropriate
+        4. Be transparent about confidence levels - lower confidence when data is limited
+        5. Focus on what IS known rather than making up what isn't
+        
+        Return a JSON object with this structure:
+        {
+            "summary": "Overall analysis summary",
+            "insights": [
+                {
+                    "category": "odds",
+                    "insight": "Key insight description",
+                    "impact": "How this affects betting decisions",
+                    "confidence": 0.85,
+                    "supporting_data": ["Data point 1", "Data point 2"]
+                }
+            ],
+            "risk_factors": [
+                {
+                    "factor": "Risk factor name",
+                    "severity": "high/medium/low",
+                    "mitigation": "How to mitigate this risk"
+                }
+            ],
+            "recommended_bet": "Specific bet recommendation",
+            "odds_analysis": {
+                "current_odds": "Current odds if available",
+                "line_movement": "Recent line movement",
+                "value_assessment": "Assessment of betting value"
+            },
+            "historical_context": "Relevant historical betting patterns",
+            "confidence_score": 0.8,
+            "citations": [
+                {
+                    "url": "https://example.com",
+                    "title": "Source title",
+                    "snippet": "Relevant excerpt",
+                    "published_date": "2023-01-01"
+                }
+            ]
+        }
+        
+        DO NOT include any explanatory text, just the JSON object.
+        """
+        
+        # Make the OpenAI API call
+        completion = openai.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context}
+            ],
+            temperature=0.2,  # Low temperature for consistent structured output
+            max_tokens=2000
+        )
+        
+        # Extract and parse the JSON response
+        analysis_json = completion.choices[0].message.content.strip()
+        
+        # Clean the JSON response
+        if analysis_json.startswith("```"):
+            analysis_json = analysis_json.split("```")[1]
+        if analysis_json.startswith("json"):
+            analysis_json = analysis_json[4:]
+        analysis_json = analysis_json.strip()
+        
+        # Parse the cleaned JSON
+        analysis_dict = json.loads(analysis_json)
+        
+        # Convert the insights to BettingInsight objects
+        insights = []
+        for insight in analysis_dict.get("insights", []):
+            insights.append(BettingInsight(
+                category=insight.get("category", "general"),
+                insight=insight.get("insight", ""),
+                impact=insight.get("impact", ""),
+                confidence=insight.get("confidence", 0.5),
+                supporting_data=insight.get("supporting_data", [])
+            ))
+        
+        # Convert the risk factors to RiskFactor objects
+        risk_factors = []
+        for risk in analysis_dict.get("risk_factors", []):
+            risk_factors.append(RiskFactor(
+                factor=risk.get("factor", ""),
+                severity=risk.get("severity", "medium"),
+                mitigation=risk.get("mitigation", "")
+            ))
+        
+        # Convert the citations to Citation objects
+        citations = []
+        for citation in analysis_dict.get("citations", []):
+            citations.append(Citation(
+                url=citation.get("url", "https://example.com"),
+                title=citation.get("title", ""),
+                snippet=citation.get("snippet", ""),
+                published_date=citation.get("published_date", "")
+            ))
+        
+        # Create the DeepResearchResult object
+        return DeepResearchResult(
+            summary=analysis_dict.get("summary", "Analysis based on available data"),
+            insights=insights,
+            risk_factors=risk_factors,
+            recommended_bet=analysis_dict.get("recommended_bet", "No specific recommendation available"),
+            odds_analysis=analysis_dict.get("odds_analysis", {"note": "Odds data not available"}),
+            historical_context=analysis_dict.get("historical_context", "No historical context available"),
+            confidence_score=analysis_dict.get("confidence_score", 0.5),
+            citations=citations,
+            last_updated=datetime.now(UTC).isoformat(),
+            metadata={"data_sources": analysis_dict.get("data_sources", [])}
+        )
+            
+    except Exception as e:
+        logger.error(f"Error in generate_analysis_result: {str(e)}", exc_info=True)
+        
+        # Create a minimal result with error information
+        return DeepResearchResult(
+            summary=f"Error generating analysis: {str(e)}",
+            insights=[],
+            risk_factors=[],
+            recommended_bet="Unable to provide recommendation due to error",
+            odds_analysis={"error": str(e)},
+            historical_context="Not available due to error",
+            confidence_score=0.1,
+            citations=[],
+            last_updated=datetime.now(UTC).isoformat()
+        )
 
 @observe(name="generate_final_response")
 async def generate_final_response(
