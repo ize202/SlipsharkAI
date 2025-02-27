@@ -8,8 +8,7 @@ API development with FastAPI
 Asynchronous programming with asyncio  
 Data processing pipelines for real-time and batch operations  
 Testing and observability with Langfuse (the US cloud version)
-Setup langfuse traces and other observability tools with Langfuse as we build the workflow
-Use the languse docs to help you see if there any metrics, traces or features we should be using as we build the workflow
+
 
 ## Prompt Chain Flow
 
@@ -57,8 +56,7 @@ Formatted output (structured JSON or Markdown for UI).
 
 - Adhere to clean architecture (separation of concerns: routes, services, tools).  
 - Implement comprehensive error handling with custom exceptions.  
-- Use async/await for all external I/O (APIs, DB, LLM).  
-- Integrate logging (e.g., logging module) and observability (LangTrace).  
+- Use async/await for all external I/O (APIs, DB, LLM).    
 - Write testable code with pytest and mock external calls.  
 - Provide clear documentation (docstrings, README, inline comments).  
 - Prioritize maintainability (modular functions) and scalability (async, caching).  
