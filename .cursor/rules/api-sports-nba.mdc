@@ -7,7 +7,21 @@ alwaysApply: false
 
 ## Important Note
 
-I'm using a RapidAPI account not a API Sports account.
+I'm using an API Sports account, not a rapid api account 
+
+So switch the headers from rapidapi to apisports the following:
+
+headers = {
+    'x-rapidapi-host': "v2.nba.api-sports.io",
+    'x-rapidapi-key': "XxXxXxXxXxXxXxXxXxXxXxXx"
+    }
+
+should be 
+
+headers = {
+    'x-apisports-host': "v2.nba.api-sports.io",
+    'x-apisports-key': "XxXxXxXxXxXxXxXxXxXxXxXx"
+    }
 
 ## Authentication
 

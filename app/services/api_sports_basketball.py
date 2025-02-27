@@ -1,651 +1,299 @@
-from typing import Optional, Dict, Any, List
+"""
+NBA API Service using RapidAPI
+This module provides a clean interface to the NBA API endpoints from RapidAPI.
+"""
+
+from typing import Optional, Dict, Any, List, TypeVar, Generic
+from datetime import datetime, UTC
 import os
 import logging
 import httpx
-from datetime import datetime, UTC
-from pydantic import BaseModel, Field
-from langfuse.decorators import observe
 import json
 import asyncio
-import time
+from pydantic import BaseModel, Field, ConfigDict
+from enum import Enum
+from dataclasses import dataclass
+from langfuse.decorators import observe
 
-# Set up logging
+# Configure logging
 logger = logging.getLogger(__name__)
 
-class BasketballTeamStats(BaseModel):
-    """Basketball team statistics from API-Sports"""
-    team_id: str
-    name: str
-    games_played: int = Field(default=0)
-    wins: int = Field(default=0)
-    losses: int = Field(default=0)
-    win_percentage: float = Field(default=0.0)
-    points_per_game: float = Field(default=0.0)
-    points_against_per_game: float = Field(default=0.0)
-    field_goals_pct: float = Field(default=0.0)
-    three_points_pct: float = Field(default=0.0)
-    free_throws_pct: float = Field(default=0.0)
-    rebounds_per_game: float = Field(default=0.0)
-    assists_per_game: float = Field(default=0.0)
-    conference_rank: Optional[int] = None
+# Type Variables
+T = TypeVar('T')
 
-class BasketballPlayerStats(BaseModel):
-    """Basketball player statistics from API-Sports"""
-    player_id: str
-    name: str
-    position: Optional[str] = None
-    minutes_per_game: float = Field(default=0.0)
-    points_per_game: float = Field(default=0.0)
-    rebounds_per_game: float = Field(default=0.0)
-    assists_per_game: float = Field(default=0.0)
-    steals_per_game: float = Field(default=0.0)
-    blocks_per_game: float = Field(default=0.0)
-    field_goals_pct: float = Field(default=0.0)
-    three_points_pct: float = Field(default=0.0)
-    free_throws_pct: float = Field(default=0.0)
+class NBAApiError(Exception):
+    """Base exception for NBA API errors"""
+    pass
 
-class BasketballGame(BaseModel):
-    """Basketball game information from API-Sports"""
-    game_id: str
-    date: datetime
-    status: str
-    home_team: str
-    away_team: str
-    home_team_id: str
-    away_team_id: str
-    home_score: Optional[int] = None
-    away_score: Optional[int] = None
-    venue: Optional[str] = None
-    stage: Optional[str] = None
-    league_id: str
-    league_name: str
-    season: str
+class RateLimitError(NBAApiError):
+    """Raised when API rate limit is exceeded"""
+    pass
 
-class BasketballStandings(BaseModel):
-    """Basketball standings information from API-Sports"""
-    team_id: str
-    team_name: str
-    conference: str
-    division: Optional[str] = None
-    position: int
-    games_played: int
-    wins: int
-    losses: int
-    win_percentage: float
-    points_for: float
-    points_against: float
-    last_ten: Optional[str] = None
-    streak: Optional[str] = None
+class AuthenticationError(NBAApiError):
+    """Raised when API authentication fails"""
+    pass
 
-class APISportsBasketballService:
-    """Service for interacting with API-Sports Basketball API"""
+@dataclass
+class NBAApiConfig:
+    """Configuration for NBA API"""
+    api_key: str
+    base_url: str = "https://v2.nba.api-sports.io"
+    host: str = "v2.nba.api-sports.io"
     
-    def __init__(self):
-        """Initialize the API-Sports Basketball service with API key and configuration"""
-        self.api_key = os.getenv("API_SPORTS_KEY")
-        logger.info("Initializing APISportsBasketballService")
-        if not self.api_key:
-            logger.error("API_SPORTS_KEY environment variable is not set")
+    @classmethod
+    def from_env(cls) -> 'NBAApiConfig':
+        """Create config from environment variables"""
+        api_key = os.getenv("API_SPORTS_KEY")
+        if not api_key:
             raise ValueError("API_SPORTS_KEY environment variable is not set")
-        
-        self.base_url = "https://v1.basketball.api-sports.io"
-        self.headers = {
-            'x-rapidapi-key': self.api_key,
-            'x-rapidapi-host': 'v1.basketball.api-sports.io'
-        }
-        logger.debug(f"API Headers configured: {json.dumps(self.headers, default=str)}")
-        self.client = None
-        self._team_ids = {}  # Cache for team IDs
-        self.nba_league_id = 12  # NBA league ID in API-Sports
-        
-        # Standard mappings for team name variations
-        self._team_name_mappings = {
-            # Los Angeles Lakers variations
-            "lakers": "Los Angeles Lakers",
-            "la lakers": "Los Angeles Lakers",
-            "l.a. lakers": "Los Angeles Lakers",
-            
-            # Golden State Warriors variations
-            "warriors": "Golden State Warriors",
-            "gsw": "Golden State Warriors",
-            "golden state": "Golden State Warriors",
-            
-            # Boston Celtics variations
-            "celtics": "Boston Celtics",
-            "boston": "Boston Celtics",
-            
-            # Brooklyn Nets variations
-            "nets": "Brooklyn Nets",
-            "brooklyn": "Brooklyn Nets",
-            
-            # Add more common variations
-            "heat": "Miami Heat",
-            "knicks": "New York Knicks",
-            "sixers": "Philadelphia 76ers",
-            "76ers": "Philadelphia 76ers",
-            "bucks": "Milwaukee Bucks",
-            "cavs": "Cleveland Cavaliers",
-            "cavaliers": "Cleveland Cavaliers",
-            "pacers": "Indiana Pacers",
-            "hawks": "Atlanta Hawks",
-            "magic": "Orlando Magic",
-            "bulls": "Chicago Bulls",
-            "raptors": "Toronto Raptors",
-            "hornets": "Charlotte Hornets",
-            "wizards": "Washington Wizards",
-            "pistons": "Detroit Pistons",
-            
-            # Western Conference
-            "nuggets": "Denver Nuggets",
-            "timberwolves": "Minnesota Timberwolves",
-            "wolves": "Minnesota Timberwolves",
-            "thunder": "Oklahoma City Thunder",
-            "okc": "Oklahoma City Thunder",
-            "clippers": "Los Angeles Clippers",
-            "la clippers": "Los Angeles Clippers",
-            "kings": "Sacramento Kings",
-            "suns": "Phoenix Suns",
-            "mavs": "Dallas Mavericks",
-            "mavericks": "Dallas Mavericks",
-            "pelicans": "New Orleans Pelicans",
-            "pels": "New Orleans Pelicans",
-            "jazz": "Utah Jazz",
-            "blazers": "Portland Trail Blazers",
-            "trail blazers": "Portland Trail Blazers",
-            "rockets": "Houston Rockets",
-            "spurs": "San Antonio Spurs",
-            "grizzlies": "Memphis Grizzlies"
-        }
-        logger.debug(f"Initialized with {len(self._team_name_mappings)} team name mappings")
+        return cls(api_key=api_key)
+
+class GameStatus(str, Enum):
+    """Game status enumeration"""
+    NOT_STARTED = "1"
+    LIVE = "2"
+    FINISHED = "3"
+    POSTPONED = "4"
+    DELAYED = "5"
+    CANCELLED = "6"
+
+class CachePolicy(BaseModel):
+    """Cache policy configuration"""
+    ttl: int  # Time to live in seconds
+    stale_while_revalidate: bool = False
+
+class CacheConfig:
+    """Cache configuration for different endpoints"""
+    TEAMS = CachePolicy(ttl=86400)  # 24 hours
+    GAMES = CachePolicy(ttl=300)     # 5 minutes
+    STANDINGS = CachePolicy(ttl=3600) # 1 hour
+    STATISTICS = CachePolicy(ttl=3600) # 1 hour
+
+class APIResponse(BaseModel, Generic[T]):
+    """Generic API response model"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    async def __aenter__(self):
+    get: str
+    parameters: Dict[str, Any]
+    errors: List[str]
+    results: int
+    response: T
+
+class Team(BaseModel):
+    """Team model"""
+    id: int
+    name: str
+    nickname: str
+    code: str
+    city: Optional[str] = None
+    logo: Optional[str] = None
+    allStar: Optional[bool] = None
+    nbaFranchise: Optional[bool] = None
+    leagues: Optional[Dict[str, Any]] = None
+
+class Game(BaseModel):
+    """Game model"""
+    id: int
+    league: str
+    season: int
+    date: Dict[str, Any]
+    stage: int
+    status: Dict[str, Any]
+    periods: Dict[str, Any]
+    arena: Dict[str, Any]
+    teams: Dict[str, Any]
+    scores: Dict[str, Any]
+    officials: List[str]
+    timesTied: Optional[int] = None
+    leadChanges: Optional[int] = None
+    nugget: Optional[str] = None
+
+class TeamStatistics(BaseModel):
+    """Team statistics model"""
+    games: int
+    fastBreakPoints: int
+    pointsInPaint: int
+    biggestLead: int
+    secondChancePoints: int
+    pointsOffTurnovers: int
+    longestRun: int
+    points: int
+    fgm: int
+    fga: int
+    fgp: str
+    ftm: int
+    fta: int
+    ftp: str
+    tpm: int
+    tpa: int
+    tpp: str
+    offReb: int
+    defReb: int
+    totReb: int
+    assists: int
+    pFouls: int
+    steals: int
+    turnovers: int
+    blocks: int
+    plusMinus: int
+
+class NBAApiClient:
+    """Low-level NBA API client"""
+    
+    def __init__(self, config: NBAApiConfig):
+        """Initialize the NBA API client"""
+        self.config = config
+        self.headers = {
+            'x-apisports-key': config.api_key,
+            'x-apisports-host': config.host
+        }
+        self.client: Optional[httpx.AsyncClient] = None
+        
+    async def __aenter__(self) -> 'NBAApiClient':
         """Async context manager entry"""
         self.client = httpx.AsyncClient(
-            timeout=30.0,  # 30 second timeout
-            headers=self.headers
+            base_url=self.config.base_url,
+            headers=self.headers,
+            timeout=30.0
         )
-        # Load team IDs when entering context
-        await self._load_team_ids()
         return self
-    
+        
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         if self.client:
             await self.client.aclose()
             self.client = None
-    
-    async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Make a request to the API-Sports Basketball API"""
+
+    async def _make_request(
+        self, 
+        endpoint: str, 
+        params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Make a request to the NBA API with retries and error handling"""
         if not self.client:
-            logger.error("Client not initialized. Use async with context manager.")
             raise RuntimeError("Client not initialized. Use async with context manager.")
             
-        try:
-            url = f"{self.base_url}/{endpoint}"
-            params = params or {}
-            
-            logger.info(f"Making request to endpoint: {endpoint}")
-            logger.debug(f"Full URL: {url}")
-            logger.debug(f"Request params: {json.dumps(params, default=str)}")
-            logger.debug(f"Request headers: {json.dumps(self.headers, default=str)}")
-
-            start_time = time.time()
-            
-            # Add retry logic for transient failures
-            max_retries = 3
-            retry_delay = 1  # seconds
-            
-            for attempt in range(max_retries):
-                try:
-                    response = await self.client.get(url, params=params)
-                    elapsed_time = time.time() - start_time
-                    
-                    logger.info(f"Response received in {elapsed_time:.2f}s with status: {response.status_code}")
-                    logger.debug(f"Response headers: {json.dumps(dict(response.headers), default=str)}")
-                    
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    # Log rate limit information if available
-                    if 'x-ratelimit-remaining' in response.headers:
-                        remaining = response.headers['x-ratelimit-remaining']
-                        logger.info(f"Rate limit remaining: {remaining}")
-                        if int(remaining) < 10:
-                            logger.warning(f"Rate limit running low: {remaining} requests remaining")
-                    
-                    # Check for API-level errors
-                    if data.get("errors") and data["errors"]:
-                        error_msg = json.dumps(data["errors"])
-                        logger.error(f"API returned errors: {error_msg}")
-                        
-                        # Check if error is due to rate limiting
-                        if any("rate limit" in str(err).lower() for err in data["errors"]):
-                            if attempt < max_retries - 1:
-                                wait_time = retry_delay * (attempt + 1)
-                                logger.warning(f"Rate limit hit, waiting {wait_time}s before retry")
-                                await asyncio.sleep(wait_time)
-                                continue
-                        
-                        raise ValueError(f"API returned errors: {error_msg}")
-                    
-                    logger.debug(f"Response data structure: {json.dumps({k: type(v).__name__ for k, v in data.items()}, default=str)}")
-                    return data
-                    
-                except httpx.TimeoutException as e:
+        params = params or {}
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Making request to {endpoint} with params: {params}")
+                response = await self.client.get(endpoint, params=params)
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                # Check rate limits
+                remaining = response.headers.get('x-ratelimit-remaining')
+                if remaining and int(remaining) < 10:
+                    logger.warning(f"Rate limit running low: {remaining} requests remaining")
+                
+                # Check for API errors
+                if data.get("errors") and data["errors"]:
+                    error_msg = json.dumps(data["errors"])
+                    if any("rate limit" in str(err).lower() for err in data["errors"]):
+                        raise RateLimitError(f"Rate limit exceeded: {error_msg}")
+                    raise NBAApiError(f"API returned errors: {error_msg}")
+                
+                return data
+                
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    raise AuthenticationError("Invalid API key")
+                if e.response.status_code == 429:
                     if attempt < max_retries - 1:
-                        wait_time = retry_delay * (attempt + 1)
-                        logger.warning(f"Request timeout, waiting {wait_time}s before retry")
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Rate limit hit, waiting {wait_time}s before retry")
                         await asyncio.sleep(wait_time)
                         continue
-                    logger.error(f"Timeout error in request to {endpoint} after {max_retries} attempts: {str(e)}")
-                    raise
-                except httpx.HTTPError as e:
-                    if attempt < max_retries - 1 and response.status_code in {429, 500, 502, 503, 504}:
-                        wait_time = retry_delay * (attempt + 1)
-                        logger.warning(f"HTTP error {response.status_code}, waiting {wait_time}s before retry")
-                        await asyncio.sleep(wait_time)
-                        continue
-                    logger.error(f"HTTP error in request to {endpoint}: {str(e)}")
-                    raise
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid JSON response from {endpoint}: {str(e)}")
-                    raise
-                except Exception as e:
-                    logger.error(f"Unexpected error in request to {endpoint}: {str(e)}")
-                    raise
-
-        except Exception as e:
-            logger.error(f"Error in request to {endpoint}: {str(e)}")
-            raise
-    
-    async def _load_team_ids(self):
-        """Load team IDs from the teams endpoint"""
-        try:
-            # Get current NBA teams
-            data = await self._make_request("teams", {
-                "league": self.nba_league_id,
-                "season": "2023-2024"  # Current season
-            })
-            
-            # Process teams
-            if "response" in data and data["response"]:
-                for team in data["response"]:
-                    name = team.get("name")
-                    team_id = str(team.get("id"))
-                    if name and team_id:
-                        self._team_ids[name] = team_id
-                        logger.debug(f"Added team mapping: {name} -> {team_id}")
-            
-            if not self._team_ids:
-                logger.error("No team IDs were loaded")
-                raise ValueError("Failed to load team IDs")
+                    raise RateLimitError("Rate limit exceeded after retries")
+                raise NBAApiError(f"HTTP error {e.response.status_code}: {str(e)}")
                 
-            logger.info(f"Successfully loaded {len(self._team_ids)} team IDs")
-            
-        except Exception as e:
-            logger.error(f"Error loading team IDs: {str(e)}")
-            raise
+            except httpx.RequestError as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"Request error, waiting {wait_time}s before retry")
+                    await asyncio.sleep(wait_time)
+                    continue
+                raise NBAApiError(f"Request failed after {max_retries} retries: {str(e)}")
+
+class NBATeamService:
+    """Service for NBA team operations"""
     
-    def normalize_team_name(self, team_name: str) -> str:
-        """Normalize team name to match the official names used by API-Sports"""
-        if not team_name:
-            return ""
-            
-        # First check if the name is already in the correct format
-        if team_name in self._team_ids:
-            return team_name
-            
-        # Try direct mapping from our predefined variations
-        normalized = self._team_name_mappings.get(team_name.lower())
-        if normalized:
-            logger.info(f"Normalized team name from '{team_name}' to '{normalized}'")
-            return normalized
-            
-        # Check if it's a partial match with any of the official team names
-        for official_name in self._team_ids.keys():
-            if team_name.lower() in official_name.lower():
-                logger.info(f"Matched partial team name '{team_name}' to '{official_name}'")
-                return official_name
-                
-        # If we still don't have a match, log a warning and return the original
-        logger.warning(f"Could not normalize team name: '{team_name}'")
-        return team_name
+    def __init__(self, client: NBAApiClient):
+        self.client = client
+        self._team_cache: Dict[str, Team] = {}
+        
+    async def list_teams(self, league: str = "standard") -> List[Team]:
+        """Get list of NBA teams"""
+        data = await self.client._make_request("teams", {"league": league})
+        return [Team(**team) for team in data.get("response", [])]
+        
+    async def get_team_statistics(
+        self, 
+        team_id: int, 
+        season: str = "2023"
+    ) -> TeamStatistics:
+        """Get team statistics"""
+        data = await self.client._make_request(
+            "teams/statistics",
+            {"id": team_id, "season": season}
+        )
+        return TeamStatistics(**data["response"])
+
+class NBAGameService:
+    """Service for NBA game operations"""
     
-    def get_team_id(self, team_name: str) -> str:
-        """Get the API-Sports team ID for a given team name"""
-        # First normalize the team name
-        normalized_name = self.normalize_team_name(team_name)
+    def __init__(self, client: NBAApiClient):
+        self.client = client
         
-        logger.debug(f"Looking up team ID for: '{normalized_name}' (original: '{team_name}')")
+    async def list_games(
+        self,
+        season: str = "2023",
+        league: str = "standard",
+        team_id: Optional[int] = None,
+        date: Optional[str] = None,
+        live: bool = False
+    ) -> List[Game]:
+        """Get list of games with optional filters"""
+        params = {
+            "season": season,
+            "league": league
+        }
+        if team_id:
+            params["team"] = team_id
+        if date:
+            params["date"] = date
+        if live:
+            params["live"] = "all"
+            
+        data = await self.client._make_request("games", params)
+        return [Game(**game) for game in data.get("response", [])]
         
-        team_id = self._team_ids.get(normalized_name)
-        if not team_id:
-            logger.error(f"Could not find team ID for '{normalized_name}'. Available teams: {list(self._team_ids.keys())}")
-            raise ValueError(f"Unknown team name: {normalized_name}")
-            
-        logger.info(f"Found team ID '{team_id}' for team '{normalized_name}'")
-        return team_id
+    async def get_game_statistics(self, game_id: int) -> Dict[str, Any]:
+        """Get statistics for a specific game"""
+        data = await self.client._make_request(
+            "games/statistics",
+            {"id": game_id}
+        )
+        return data.get("response", {})
 
-    @observe(name="api_sports_get_team_stats")
-    async def get_team_stats(self, team_name_or_id: str) -> BasketballTeamStats:
-        """Get team statistics from API-Sports Basketball"""
-        try:
-            # If a team name was provided, convert it to an ID
-            team_id = team_name_or_id
-            if not team_name_or_id.isdigit():
-                team_id = self.get_team_id(team_name_or_id)
-                logger.info(f"Converted team name '{team_name_or_id}' to ID '{team_id}'")
-
-            logger.info(f"Fetching team stats for team_id: {team_id}")
-            
-            # Get team statistics for the current season
-            data = await self._make_request("statistics", {
-                "league": self.nba_league_id,
-                "season": "2023-2024",  # Current season
-                "team": team_id
-            })
-            
-            if not data.get("response"):
-                logger.error(f"No statistics found for team {team_id}")
-                raise ValueError(f"No statistics found for team {team_id}")
-                
-            stats = data["response"]
-            logger.debug(f"Raw stats structure: {json.dumps({k: type(v).__name__ for k, v in stats.items()}, default=str)}")
-            
-            # Extract team info with detailed logging
-            team_info = stats.get("team", {})
-            games = stats.get("games", {})
-            points = stats.get("points", {})
-            
-            # Log extracted values for debugging
-            logger.debug(f"Extracted team_info: {json.dumps(team_info, default=str)}")
-            logger.debug(f"Extracted games data: {json.dumps(games, default=str)}")
-            logger.debug(f"Extracted points data: {json.dumps(points, default=str)}")
-            
-            # Calculate averages and percentages
-            games_played = games.get("played", {}).get("all", 0)
-            points_for = points.get("for", {}).get("average", {}).get("all", 0)
-            points_against = points.get("against", {}).get("average", {}).get("all", 0)
-            
-            logger.info(f"Calculated stats - Games played: {games_played}, Points for: {points_for}, Points against: {points_against}")
-            
-            # Get standings to determine conference rank
-            standings_data = await self._make_request("standings", {
-                "league": self.nba_league_id,
-                "season": "2023-2024",
-                "team": team_id
-            })
-            
-            conference_rank = None
-            if standings_data.get("response"):
-                for standing in standings_data["response"][0]:  # API returns list of lists
-                    if str(standing.get("team", {}).get("id")) == team_id:
-                        conference_rank = standing.get("position")
-                        logger.info(f"Found conference rank {conference_rank} for team {team_id}")
-                        break
-            
-            # Create and return the team stats object
-            stats_obj = BasketballTeamStats(
-                team_id=team_id,
-                name=team_info.get("name", ""),
-                games_played=games_played,
-                wins=games.get("wins", {}).get("all", {}).get("total", 0),
-                losses=games.get("loses", {}).get("all", {}).get("total", 0),
-                win_percentage=float(games.get("wins", {}).get("all", {}).get("percentage", "0")),
-                points_per_game=float(points_for),
-                points_against_per_game=float(points_against),
-                field_goals_pct=float(stats.get("fgp", {}).get("all", 0)),
-                three_points_pct=float(stats.get("tpp", {}).get("all", 0)),
-                free_throws_pct=float(stats.get("ftp", {}).get("all", 0)),
-                rebounds_per_game=float(stats.get("rebounds", {}).get("average", {}).get("all", 0)),
-                assists_per_game=float(stats.get("assists", {}).get("average", {}).get("all", 0)),
-                conference_rank=conference_rank
-            )
-            
-            logger.info(f"Successfully created stats object for team {team_id}")
-            logger.debug(f"Final stats object: {json.dumps(stats_obj.dict(), default=str)}")
-            
-            return stats_obj
-
-        except Exception as e:
-            logger.error(f"Error getting team stats for team {team_name_or_id}: {str(e)}")
-            raise ValueError(f"Error getting team stats for team {team_name_or_id}") from e
+class NBAService:
+    """Main NBA service facade"""
     
-    @observe(name="api_sports_get_player_stats")
-    async def get_player_stats(self, team_name_or_id: str) -> List[BasketballPlayerStats]:
-        """Get current season statistics for all players on a team
+    def __init__(self):
+        self.config = NBAApiConfig.from_env()
+        self.client = NBAApiClient(self.config)
+        self.teams = NBATeamService(self.client)
+        self.games = NBAGameService(self.client)
         
-        Args:
-            team_name_or_id (str): Either the team name or team ID. If a name is provided,
-                                  it will be converted to an ID.
+    async def __aenter__(self) -> 'NBAService':
+        """Async context manager entry"""
+        await self.client.__aenter__()
+        return self
         
-        Returns:
-            List[BasketballPlayerStats]: List of player statistics
-            
-        Raises:
-            ValueError: If the team cannot be found or if there's an error getting stats
-        """
-        try:
-            # If a team name was provided, convert it to an ID
-            team_id = team_name_or_id
-            if not team_name_or_id.isdigit():
-                team_id = self.get_team_id(team_name_or_id)
-                logger.info(f"Converted team name '{team_name_or_id}' to ID '{team_id}'")
-
-            # First get the team's players
-            players_data = await self._make_request("players", {
-                "team": team_id,
-                "season": "2023-2024"  # Current season
-            })
-            
-            if not players_data.get("response"):
-                raise ValueError(f"No players found for team {team_id}")
-            
-            # Get statistics for each player
-            player_stats_list = []
-            for player in players_data["response"]:
-                player_id = str(player.get("id"))
-                
-                # Get player statistics
-                stats_data = await self._make_request("players/statistics", {
-                    "player": player_id,
-                    "season": "2023-2024"
-                })
-                
-                if not stats_data.get("response"):
-                    # If no stats, create basic player info
-                    player_stats = BasketballPlayerStats(
-                        player_id=player_id,
-                        name=player.get("name", ""),
-                        position=player.get("position")
-                    )
-                else:
-                    # Process player statistics
-                    stats = stats_data["response"][0]  # Get first stats entry
-                    player_stats = BasketballPlayerStats(
-                        player_id=player_id,
-                        name=player.get("name", ""),
-                        position=player.get("position"),
-                        minutes_per_game=float(stats.get("minutes", "0").split(":")[0]),  # Convert "MM:SS" to minutes
-                        points_per_game=float(stats.get("points", 0)),
-                        rebounds_per_game=float(stats.get("rebounds", {}).get("total", 0)),
-                        assists_per_game=float(stats.get("assists", 0)),
-                        steals_per_game=float(stats.get("steals", 0)),
-                        blocks_per_game=float(stats.get("blocks", 0)),
-                        field_goals_pct=float(stats.get("fgp", 0)),
-                        three_points_pct=float(stats.get("tpp", 0)),
-                        free_throws_pct=float(stats.get("ftp", 0))
-                    )
-                
-                player_stats_list.append(player_stats)
-            
-            return player_stats_list
-
-        except Exception as e:
-            logger.error(f"Error getting player stats: {str(e)}")
-            raise ValueError(f"Error getting player stats for team {team_name_or_id}") from e
-
-    @observe(name="api_sports_get_standings")
-    async def get_standings(self) -> List[BasketballStandings]:
-        """Get current NBA standings
-        
-        Returns:
-            List[BasketballStandings]: List of team standings
-            
-        Raises:
-            ValueError: If there's an error getting standings
-        """
-        try:
-            data = await self._make_request("standings", {
-                "season": "2023-2024"  # Current season
-            })
-            
-            if not data.get("response"):
-                raise ValueError("No standings data available")
-            
-            standings_list = []
-            for conference_standings in data["response"]:  # API returns list of lists for each conference
-                for standing in conference_standings:
-                    team_info = standing.get("team", {})
-                    games = standing.get("games", {})
-                    points = standing.get("points", {})
-                    group = standing.get("group", {})
-                    
-                    standings_list.append(BasketballStandings(
-                        team_id=str(team_info.get("id")),
-                        team_name=team_info.get("name", ""),
-                        conference=group.get("name", ""),
-                        position=standing.get("position", 0),
-                        games_played=games.get("played", 0),
-                        wins=games.get("win", {}).get("total", 0),
-                        losses=games.get("lose", {}).get("total", 0),
-                        win_percentage=float(games.get("win", {}).get("percentage", "0")),
-                        points_for=float(points.get("for", 0)),
-                        points_against=float(points.get("against", 0)),
-                        last_ten=standing.get("form", ""),  # API returns form as "WWLWL" format
-                        streak=None  # API doesn't provide streak information directly
-                    ))
-            
-            return standings_list
-            
-        except Exception as e:
-            logger.error(f"Error getting standings: {str(e)}")
-            raise ValueError("Error getting standings") from e
-    
-    @observe(name="api_sports_get_upcoming_games")
-    async def get_upcoming_games(self, team_name: str) -> List[BasketballGame]:
-        """Get upcoming games for a specific team
-        
-        Args:
-            team_name (str): The name of the team
-            
-        Returns:
-            List[BasketballGame]: List of upcoming games
-            
-        Raises:
-            ValueError: If the team cannot be found or if there's an error getting games
-        """
-        try:
-            team_id = self.get_team_id(team_name)
-            
-            # Get next 10 games for the team
-            data = await self._make_request("games", {
-                "league": self.nba_league_id,
-                "season": "2023-2024",
-                "team": team_id,
-                "timezone": "America/New_York"  # Use Eastern Time for NBA games
-            })
-            
-            if not data.get("response"):
-                raise ValueError(f"No games found for team {team_name}")
-            
-            games_list = []
-            for game in data["response"]:
-                # Only include upcoming games (status "NS" = Not Started)
-                if game.get("status", {}).get("short") == "NS":
-                    teams = game.get("teams", {})
-                    scores = game.get("scores", {})
-                    league = game.get("league", {})
-                    
-                    games_list.append(BasketballGame(
-                        game_id=str(game.get("id")),
-                        date=datetime.fromtimestamp(game.get("timestamp", 0), UTC),
-                        status=game.get("status", {}).get("long", "Not Started"),
-                        home_team=teams.get("home", {}).get("name", ""),
-                        away_team=teams.get("away", {}).get("name", ""),
-                        home_team_id=str(teams.get("home", {}).get("id", "")),
-                        away_team_id=str(teams.get("away", {}).get("id", "")),
-                        home_score=scores.get("home", {}).get("total"),
-                        away_score=scores.get("away", {}).get("total"),
-                        venue=game.get("venue"),
-                        stage=game.get("stage"),
-                        league_id=str(league.get("id")),
-                        league_name=league.get("name", ""),
-                        season=league.get("season", "")
-                    ))
-            
-            return games_list
-            
-        except Exception as e:
-            logger.error(f"Error getting upcoming games for team {team_name}: {str(e)}")
-            raise ValueError(f"Error getting upcoming games for team {team_name}") from e
-    
-    @observe(name="api_sports_get_head_to_head")
-    async def get_head_to_head(self, team1_name: str, team2_name: str) -> List[BasketballGame]:
-        """Get head-to-head games between two teams
-        
-        Args:
-            team1_name (str): Name of the first team
-            team2_name (str): Name of the second team
-            
-        Returns:
-            List[BasketballGame]: List of games between the two teams
-            
-        Raises:
-            ValueError: If either team cannot be found or if there's an error getting games
-        """
-        try:
-            team1_id = self.get_team_id(team1_name)
-            team2_id = self.get_team_id(team2_name)
-            
-            # Get head-to-head games
-            data = await self._make_request("games", {
-                "h2h": f"{team1_id}-{team2_id}",
-                "league": self.nba_league_id,
-                "season": "2023-2024",  # Current season
-                "timezone": "America/New_York"
-            })
-            
-            if not data.get("response"):
-                raise ValueError(f"No head-to-head games found between {team1_name} and {team2_name}")
-            
-            games_list = []
-            for game in data["response"]:
-                teams = game.get("teams", {})
-                scores = game.get("scores", {})
-                league = game.get("league", {})
-                
-                games_list.append(BasketballGame(
-                    game_id=str(game.get("id")),
-                    date=datetime.fromtimestamp(game.get("timestamp", 0), UTC),
-                    status=game.get("status", {}).get("long", ""),
-                    home_team=teams.get("home", {}).get("name", ""),
-                    away_team=teams.get("away", {}).get("name", ""),
-                    home_team_id=str(teams.get("home", {}).get("id", "")),
-                    away_team_id=str(teams.get("away", {}).get("id", "")),
-                    home_score=scores.get("home", {}).get("total"),
-                    away_score=scores.get("away", {}).get("total"),
-                    venue=game.get("venue"),
-                    stage=game.get("stage"),
-                    league_id=str(league.get("id")),
-                    league_name=league.get("name", ""),
-                    season=league.get("season", "")
-                ))
-            
-            return games_list
-            
-        except Exception as e:
-            logger.error(f"Error getting head-to-head games: {str(e)}")
-            raise ValueError(f"Error getting head-to-head games between {team1_name} and {team2_name}") from e
-
-    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.client.__aexit__(exc_type, exc_val, exc_tb)
