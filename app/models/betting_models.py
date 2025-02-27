@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 from enum import Enum
 from pydantic import BaseModel, Field
 from datetime import datetime
+import json
 
 class SportType(str, Enum):
     """Supported sports for betting analysis"""
@@ -13,11 +14,20 @@ class SportType(str, Enum):
     OTHER = "other"
 
 class Citation(BaseModel):
-    """Citation for research sources"""
-    url: str
-    title: Optional[str] = None
-    snippet: Optional[str] = None
-    published_date: Optional[str] = None
+    """Citation for a source used in research"""
+    url: str = Field(description="URL of the source")
+    title: Optional[str] = Field(default=None, description="Title of the source")
+    snippet: Optional[str] = Field(default=None, description="Relevant snippet from the source")
+    published_date: Optional[str] = Field(default=None, description="Publication date of the source")
+    
+    def model_dump(self) -> dict:
+        """Convert the model to a dictionary"""
+        return {
+            "url": self.url,
+            "title": self.title,
+            "snippet": self.snippet,
+            "published_date": self.published_date
+        }
 
 class DataPoint(BaseModel):
     """Data point from a specific source"""
@@ -148,4 +158,19 @@ class PerplexityResponse(BaseModel):
     related_questions: List[str] = Field(default=[], description="Related questions suggested by Perplexity")
     key_points: List[str] = Field(default=[], description="Key points extracted from the analysis")
     confidence_score: float = Field(default=0.5, description="Confidence score in the analysis (0-1)")
-    deep_research_recommended: bool = Field(default=False, description="Whether deep research is recommended") 
+    deep_research_recommended: bool = Field(default=False, description="Whether deep research is recommended")
+    
+    def model_dump_json(self, **kwargs) -> str:
+        """Convert the model to a JSON string"""
+        return json.dumps(self.model_dump(), **kwargs)
+    
+    def model_dump(self) -> dict:
+        """Convert the model to a dictionary"""
+        return {
+            "content": self.content,
+            "citations": [citation.model_dump() for citation in self.citations],
+            "related_questions": self.related_questions,
+            "key_points": self.key_points,
+            "confidence_score": self.confidence_score,
+            "deep_research_recommended": self.deep_research_recommended
+        } 

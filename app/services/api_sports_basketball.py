@@ -327,7 +327,6 @@ class APISportsBasketballService:
             # First get the team's players
             players_data = await self._make_request("players", {
                 "team": team_id,
-                "league": self.nba_league_id,
                 "season": "2023-2024"  # Current season
             })
             
@@ -342,7 +341,6 @@ class APISportsBasketballService:
                 # Get player statistics
                 stats_data = await self._make_request("players/statistics", {
                     "player": player_id,
-                    "league": self.nba_league_id,
                     "season": "2023-2024"
                 })
                 
@@ -391,7 +389,6 @@ class APISportsBasketballService:
         """
         try:
             data = await self._make_request("standings", {
-                "league": self.nba_league_id,
                 "season": "2023-2024"  # Current season
             })
             

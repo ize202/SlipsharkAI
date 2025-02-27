@@ -127,7 +127,11 @@ def redis_cache(
             if redis_client and result is not None:
                 try:
                     if serialize_json:
-                        redis_client.setex(cache_key, ttl, json.dumps(result))
+                        # Check if result is a Pydantic model with model_dump method
+                        if hasattr(result, 'model_dump') and callable(getattr(result, 'model_dump')):
+                            redis_client.setex(cache_key, ttl, json.dumps(result.model_dump()))
+                        else:
+                            redis_client.setex(cache_key, ttl, json.dumps(result))
                     else:
                         redis_client.setex(cache_key, ttl, pickle.dumps(result))
                 except Exception as e:
@@ -205,7 +209,11 @@ def redis_cache(
             if redis_client and result is not None:
                 try:
                     if serialize_json:
-                        redis_client.setex(cache_key, ttl, json.dumps(result))
+                        # Check if result is a Pydantic model with model_dump method
+                        if hasattr(result, 'model_dump') and callable(getattr(result, 'model_dump')):
+                            redis_client.setex(cache_key, ttl, json.dumps(result.model_dump()))
+                        else:
+                            redis_client.setex(cache_key, ttl, json.dumps(result))
                     else:
                         redis_client.setex(cache_key, ttl, pickle.dumps(result))
                 except Exception as e:

@@ -6,6 +6,8 @@ from app.models.betting_models import (
     DeepResearchResult,
     DataPoint
 )
+import asyncio
+from datetime import datetime, UTC
 
 # Import LLM functions with a single preferred path
 try:
@@ -34,11 +36,130 @@ class BettingResearchChain:
 
     async def _gather_data(self, query: QueryAnalysis) -> list[DataPoint]:
         """Gather data from various sources based on query requirements"""
+        logger.info(f"Gathering data for {query.sport_type} query")
         data_points = []
         
-        # TODO: Implement parallel data gathering from various sources
-        # This is where you'd integrate with sports APIs, web search, etc.
+        # Extract team names from the query analysis
+        teams = [team for team in query.teams.values() if team]
         
+        if not teams:
+            logger.warning("No teams found in query analysis, using generic research")
+            # If no specific teams, we'll still try to gather general data
+            if query.sport_type == SportType.BASKETBALL:
+                teams = ["NBA"]  # Use generic NBA as fallback
+            elif query.sport_type == SportType.FOOTBALL:
+                teams = ["NFL"]
+            elif query.sport_type == SportType.BASEBALL:
+                teams = ["MLB"]
+            elif query.sport_type == SportType.HOCKEY:
+                teams = ["NHL"]
+            elif query.sport_type == SportType.SOCCER:
+                teams = ["Soccer"]
+        
+        # Initialize services based on the sport type
+        if query.sport_type == SportType.BASKETBALL:
+            # Import services here to avoid circular imports
+            from app.services.perplexity import PerplexityService
+            from app.services.api_sports_basketball import APISportsBasketballService
+            from app.services.supabase import SupabaseService
+            
+            # Gather data from all sources in parallel
+            async with PerplexityService() as perplexity, APISportsBasketballService() as basketball:
+                # Define all the tasks we want to run in parallel
+                tasks = []
+                
+                # Add Perplexity tasks for general research
+                tasks.append(
+                    perplexity.quick_research(
+                        query=f"Latest {query.sport_type.value} betting information for {query.raw_query}",
+                        search_recency="day"
+                    )
+                )
+                
+                # Add tasks for each team
+                for team in teams:
+                    if team != "NBA":  # Skip team-specific queries for generic NBA
+                        # Add Perplexity search for this team
+                        tasks.append(
+                            perplexity.quick_research(
+                                query=f"Latest news, injuries, and betting trends for {team}",
+                                search_recency="day"
+                            )
+                        )
+                        
+                        # Try to get team-specific data from API-Sports
+                        try:
+                            # Get team stats
+                            tasks.append(basketball.get_team_stats(team))
+                            
+                            # Get player stats
+                            tasks.append(basketball.get_player_stats(team))
+                            
+                            # Get upcoming games
+                            tasks.append(basketball.get_upcoming_games(team))
+                        except Exception as e:
+                            logger.warning(f"Could not add team-specific API-Sports tasks for {team}: {str(e)}")
+                
+                # Execute all tasks in parallel
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Process results and handle any exceptions
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Error in data gathering task {i}: {str(result)}")
+                    else:
+                        # Add successful results to data points
+                        if result:
+                            source_name = tasks[i].__qualname__ if hasattr(tasks[i], '__qualname__') else f"task_{i}"
+                            data_points.append(DataPoint(
+                                source=source_name,
+                                content=result.model_dump() if hasattr(result, 'model_dump') else str(result),
+                                timestamp=datetime.now(UTC)
+                            ))
+        
+        elif query.sport_type in [SportType.FOOTBALL, SportType.BASEBALL, SportType.HOCKEY, SportType.SOCCER]:
+            # For other sports, we'll use Perplexity for now
+            from app.services.perplexity import PerplexityService
+            
+            async with PerplexityService() as perplexity:
+                # Add Perplexity tasks for general research
+                tasks = []
+                
+                tasks.append(
+                    perplexity.quick_research(
+                        query=f"Latest {query.sport_type.value} betting information for {query.raw_query}",
+                        search_recency="day"
+                    )
+                )
+                
+                # Add tasks for each team
+                for team in teams:
+                    if team not in ["NFL", "MLB", "NHL", "Soccer"]:  # Skip team-specific queries for generic sports
+                        tasks.append(
+                            perplexity.quick_research(
+                                query=f"Latest news, injuries, and betting trends for {team} in {query.sport_type.value}",
+                                search_recency="day"
+                            )
+                        )
+                
+                # Execute all tasks in parallel
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Process results and handle any exceptions
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Error in data gathering task {i}: {str(result)}")
+                    else:
+                        # Add successful results to data points
+                        if result:
+                            source_name = tasks[i].__qualname__ if hasattr(tasks[i], '__qualname__') else f"task_{i}"
+                            data_points.append(DataPoint(
+                                source=source_name,
+                                content=result.model_dump() if hasattr(result, 'model_dump') else str(result),
+                                timestamp=datetime.now(UTC)
+                            ))
+        
+        logger.info(f"Gathered {len(data_points)} data points")
         return data_points
 
     async def process_query(
