@@ -801,8 +801,8 @@ async def structured_llm_call(
             *messages
         ]
         
-        # Make the OpenAI API call
-        completion = await openai.chat.completions.create(
+        # Make the OpenAI API call (synchronous)
+        completion = openai.chat.completions.create(
             model=model,
             messages=full_messages,
             temperature=temperature,

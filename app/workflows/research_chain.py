@@ -182,6 +182,9 @@ class ResearchChain:
             if request.mode != ResearchMode.AUTO:
                 analysis_result["is_deep_research"] = (request.mode == ResearchMode.DEEP)
             
+            # Add recommended_mode based on is_deep_research flag
+            analysis_result["recommended_mode"] = ResearchMode.DEEP if analysis_result.get("is_deep_research", False) else ResearchMode.QUICK
+            
             # Convert to QueryAnalysis model
             return QueryAnalysis(**analysis_result)
             
@@ -204,7 +207,7 @@ class ResearchChain:
         ))
 
         # For deep research, add additional data sources
-        if analysis.is_deep_research:
+        if analysis.recommended_mode == ResearchMode.DEEP:
             if analysis.sport_type == SportType.BASKETBALL:
                 for team in analysis.teams.values():
                     if team:
@@ -222,9 +225,17 @@ class ResearchChain:
             if isinstance(result, Exception):
                 logger.error(f"Error in data gathering task {i}: {str(result)}")
             else:
+                # Convert PerplexityResponse to dict if needed
+                if hasattr(result, 'model_dump'):
+                    content = result.model_dump()
+                elif hasattr(result, 'dict'):
+                    content = result.dict()
+                else:
+                    content = result
+                    
                 data_points.append(DataPoint(
                     source=f"task_{i}",
-                    content=result,
+                    content=content,
                     timestamp=datetime.utcnow(),
                     confidence=0.9
                 ))
@@ -239,14 +250,23 @@ class ResearchChain:
     ) -> Dict[str, Any]:
         """Analyze gathered data using either quick or deep analysis"""
         try:
+            # Convert data points to dict and handle datetime serialization
+            data_points_dict = []
+            for dp in data_points:
+                dp_dict = dp.dict()
+                # Convert datetime to string
+                if 'timestamp' in dp_dict and isinstance(dp_dict['timestamp'], datetime):
+                    dp_dict['timestamp'] = dp_dict['timestamp'].isoformat()
+                data_points_dict.append(dp_dict)
+                
             # Prepare data context
             context = {
                 "query": request.query,
                 "analysis": analysis.dict(),
-                "data_points": [dp.dict() for dp in data_points]
+                "data_points": data_points_dict
             }
             
-            if analysis.is_deep_research:
+            if analysis.recommended_mode == ResearchMode.DEEP:
                 # Deep research path
                 return await structured_llm_call(
                     prompt=self.DEEP_ANALYSIS_PROMPT,
@@ -311,7 +331,7 @@ class ResearchChain:
             # Create metadata
             metadata = ResearchMetadata(
                 query_id=str(uuid.uuid4()),
-                mode_used=ResearchMode.DEEP if analysis.is_deep_research else ResearchMode.QUICK,
+                mode_used=analysis.recommended_mode,
                 processing_time=processing_time,
                 confidence_score=analysis_result.get("confidence_score", 0.5),
                 timestamp=datetime.utcnow()
