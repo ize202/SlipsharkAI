@@ -21,7 +21,7 @@ from app.models.research_models import (
 from app.services.perplexity import PerplexityService
 from app.services.api_sports_basketball import APISportsBasketballService
 from app.services.supabase import SupabaseService
-from app.utils.llm_utils import structured_llm_call, raw_llm_call
+from app.utils.llm_utils import structured_llm_call
 from app.config import get_logger
 from langfuse.decorators import observe
 
@@ -315,6 +315,35 @@ class ResearchChain:
             logger.error(f"Error in data analysis: {str(e)}", exc_info=True)
             raise
 
+    @observe(name="generate_final_response")
+    async def _generate_final_response(
+        self,
+        query: str,
+        research_result: Union[QuickResearchResponse, DeepResearchResponse],
+        is_deep_research: bool
+    ) -> Dict[str, Any]:
+        """[LLM Call 3] Generate natural conversational response from structured analysis"""
+        try:
+            # Prepare context for response generation
+            context = {
+                "original_query": query,
+                "analysis_result": research_result.model_dump(),
+                "mode": "deep" if is_deep_research else "quick"
+            }
+            
+            # Generate conversational response
+            result = await structured_llm_call(
+                prompt=self.Prompts.RESPONSE_GENERATION,
+                messages=[{"role": "user", "content": json.dumps(context)}],
+                temperature=0.7  # Slightly higher temperature for more natural language
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in response generation: {str(e)}", exc_info=True)
+            raise
+
     @observe(name="process_request")
     async def process_request(self, request: ResearchRequest) -> ResearchResponse:
         """Main entry point for processing research requests"""
@@ -333,7 +362,7 @@ class ResearchChain:
             analysis_result = await self._analyze_data(request, analysis, data_points)
             
             # Step 4: Generate Final Response (LLM Call 3)
-            enhanced_result = await generate_final_response(
+            enhanced_result = await self._generate_final_response(
                 query=request.query,
                 research_result=analysis_result,
                 is_deep_research=(analysis.recommended_mode == ResearchMode.DEEP)
