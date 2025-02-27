@@ -137,6 +137,110 @@ class TeamStatistics(BaseModel):
     blocks: int
     plusMinus: int
 
+class PlayerBirth(BaseModel):
+    """Player birth information"""
+    date: Optional[str] = None
+    country: Optional[str] = None
+
+class PlayerNBA(BaseModel):
+    """Player NBA information"""
+    start: int
+    pro: int
+
+class PlayerHeight(BaseModel):
+    """Player height information"""
+    feets: Optional[str] = None
+    inches: Optional[str] = None
+    meters: Optional[str] = None
+
+class PlayerWeight(BaseModel):
+    """Player weight information"""
+    pounds: Optional[str] = None
+    kilograms: Optional[str] = None
+
+class PlayerLeague(BaseModel):
+    """Player league information"""
+    standard: Optional[dict] = None
+
+class Player(BaseModel):
+    """Player information"""
+    id: int
+    firstname: str
+    lastname: str
+    birth: PlayerBirth
+    nba: PlayerNBA
+    height: PlayerHeight
+    weight: PlayerWeight
+    college: Optional[str] = None
+    affiliation: Optional[str] = None
+    leagues: PlayerLeague
+
+class PlayerStatistics(BaseModel):
+    """Player statistics"""
+    player: Dict[str, Any]  # Raw player data
+    team: Dict[str, Any]  # Raw team data
+    points: Optional[int] = None
+    pos: Optional[str] = None
+    min: Optional[str] = None
+    fgm: Optional[int] = None
+    fga: Optional[int] = None
+    fgp: Optional[str] = None
+    ftm: Optional[int] = None
+    fta: Optional[int] = None
+    ftp: Optional[str] = None
+    tpm: Optional[int] = None
+    tpa: Optional[int] = None
+    tpp: Optional[str] = None
+    offReb: Optional[int] = None
+    defReb: Optional[int] = None
+    totReb: Optional[int] = None
+    assists: Optional[int] = None
+    pFouls: Optional[int] = None
+    steals: Optional[int] = None
+    turnovers: Optional[int] = None
+    blocks: Optional[int] = None
+    plusMinus: Optional[str] = None
+    games_played: Optional[int] = None
+    games_started: Optional[int] = None
+
+class StandingConference(BaseModel):
+    """Standing conference information"""
+    name: str
+    rank: int
+    win: int
+    loss: int
+    gamesBehind: Optional[str] = None
+
+class StandingDivision(BaseModel):
+    """Standing division information"""
+    name: str
+    rank: int
+    win: int
+    loss: int
+    gamesBehind: Optional[str] = None
+
+class StandingRecord(BaseModel):
+    """Standing record information"""
+    home: int
+    away: int
+    total: int
+    percentage: str
+    lastTen: Optional[int] = None
+
+class Standing(BaseModel):
+    """Standing information"""
+    league: str
+    season: int
+    team: Team
+    conference: StandingConference
+    division: StandingDivision
+    win: StandingRecord
+    loss: StandingRecord
+    gamesBehind: Optional[str] = None
+    streak: int
+    winStreak: bool
+    tieBreakerPoints: Optional[float] = None
+
 class NBAApiClient:
     """Low-level NBA API client"""
     
@@ -241,7 +345,10 @@ class NBATeamService:
             "teams/statistics",
             {"id": team_id, "season": season}
         )
-        return TeamStatistics(**data["response"])
+        # API returns a list, take the first item
+        if not data["response"]:
+            raise NBAApiError(f"No statistics found for team {team_id}")
+        return TeamStatistics(**data["response"][0])
 
 class NBAGameService:
     """Service for NBA game operations"""
@@ -280,14 +387,117 @@ class NBAGameService:
         )
         return data.get("response", {})
 
-class NBAService:
-    """Main NBA service facade"""
+class NBASeasonService:
+    """Service for NBA season operations"""
     
-    def __init__(self):
-        self.config = NBAApiConfig.from_env()
-        self.client = NBAApiClient(self.config)
+    def __init__(self, client: NBAApiClient):
+        self.client = client
+        
+    async def list_seasons(self) -> List[int]:
+        """Get list of available seasons"""
+        data = await self.client._make_request("seasons")
+        return data.get("response", [])
+
+class NBALeagueService:
+    """Service for NBA league operations"""
+    
+    def __init__(self, client: NBAApiClient):
+        self.client = client
+        
+    async def list_leagues(self) -> List[str]:
+        """Get list of available leagues"""
+        data = await self.client._make_request("leagues")
+        return data.get("response", [])
+
+class NBAPlayerService:
+    """Service for NBA player operations"""
+    
+    def __init__(self, client: NBAApiClient):
+        self.client = client
+        
+    async def get_players(
+        self,
+        season: str,
+        team_id: Optional[int] = None,
+        name: Optional[str] = None,
+        country: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> List[Player]:
+        """Get list of players with optional filters"""
+        params = {"season": season}
+        if team_id:
+            params["team"] = team_id
+        if name:
+            params["name"] = name
+        if country:
+            params["country"] = country
+        if search and len(search) >= 3:
+            params["search"] = search
+            
+        data = await self.client._make_request("players", params)
+        return [Player(**player) for player in data.get("response", [])]
+        
+    async def get_player_statistics(
+        self,
+        player_id: Optional[int] = None,
+        game_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        season: Optional[str] = None
+    ) -> List[PlayerStatistics]:
+        """Get player statistics with optional filters"""
+        params = {}
+        if player_id:
+            params["id"] = player_id
+        if game_id:
+            params["game"] = game_id
+        if team_id:
+            params["team"] = team_id
+        if season:
+            params["season"] = season
+            
+        data = await self.client._make_request("players/statistics", params)
+        return [PlayerStatistics(**stats) for stats in data.get("response", [])]
+
+class NBAStandingService:
+    """Service for NBA standings operations"""
+    
+    def __init__(self, client: NBAApiClient):
+        self.client = client
+        
+    async def get_standings(
+        self,
+        league: str,
+        season: str,
+        team_id: Optional[int] = None,
+        conference: Optional[str] = None,
+        division: Optional[str] = None
+    ) -> List[Standing]:
+        """Get standings with optional filters"""
+        params = {
+            "league": league,
+            "season": season
+        }
+        if team_id:
+            params["team"] = team_id
+        if conference:
+            params["conference"] = conference.lower()
+        if division:
+            params["division"] = division.lower()
+            
+        data = await self.client._make_request("standings", params)
+        return [Standing(**standing) for standing in data.get("response", [])]
+
+class NBAService:
+    """NBA API service"""
+    def __init__(self, config: NBAApiConfig):
+        """Initialize the NBA API service"""
+        self.client = NBAApiClient(config)
         self.teams = NBATeamService(self.client)
         self.games = NBAGameService(self.client)
+        self.seasons = NBASeasonService(self.client)
+        self.leagues = NBALeagueService(self.client)
+        self.players = NBAPlayerService(self.client)
+        self.standings = NBAStandingService(self.client)
         
     async def __aenter__(self) -> 'NBAService':
         """Async context manager entry"""
