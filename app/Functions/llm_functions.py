@@ -772,6 +772,7 @@ async def generate_final_response(
         result_dict["conversational_response"] = fallback_response
         return result_dict 
 
+@observe(name="structured_llm_call")
 async def structured_llm_call(
     prompt: str,
     messages: List[Dict[str, str]],
@@ -801,8 +802,8 @@ async def structured_llm_call(
             *messages
         ]
         
-        # Make the OpenAI API call (synchronous)
-        completion = openai.chat.completions.create(
+        # Make the OpenAI API call
+        completion = await openai.chat.completions.create(
             model=model,
             messages=full_messages,
             temperature=temperature,
@@ -813,28 +814,9 @@ async def structured_llm_call(
         response_text = completion.choices[0].message.content.strip()
         
         if should_validate_json:
-            # Clean the JSON response
-            if response_text.startswith("```"):
-                # Extract JSON from code blocks
-                matches = re.findall(r"```(?:json)?\n(.*?)```", response_text, re.DOTALL)
-                if matches:
-                    response_text = matches[0]
-                else:
-                    response_text = response_text.replace("```", "")
-            
-            # Remove any json language identifier
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-            
-            response_text = response_text.strip()
-            
-            try:
-                # Parse and validate JSON
-                return json.loads(response_text)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON response: {str(e)}")
-                logger.error(f"Raw response: {response_text}")
-                raise ValueError("LLM response was not valid JSON")
+            # Clean and parse JSON response
+            cleaned_json = clean_json_string(response_text)
+            return validate_json_response(cleaned_json)
         else:
             # Return raw response for non-JSON cases
             return {"response": response_text}
@@ -843,6 +825,7 @@ async def structured_llm_call(
         logger.error(f"Error in structured_llm_call: {str(e)}", exc_info=True)
         raise
 
+@observe(name="raw_llm_call")
 async def raw_llm_call(
     system_prompt: str,
     user_prompt: str,
@@ -880,6 +863,7 @@ async def raw_llm_call(
         logger.error(f"Error in raw_llm_call: {str(e)}", exc_info=True)
         raise
 
+@observe(name="stream_llm_call")
 async def stream_llm_call(
     system_prompt: str,
     user_prompt: str,
@@ -931,8 +915,7 @@ def clean_json_string(json_str: str) -> str:
 def validate_json_response(response: str) -> Dict[str, Any]:
     """Validate and parse a JSON response string"""
     try:
-        cleaned = clean_json_string(response)
-        return json.loads(cleaned)
+        return json.loads(response)
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON response: {str(e)}")
         logger.error(f"Raw response: {response}")
