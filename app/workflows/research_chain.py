@@ -41,10 +41,23 @@ class ResearchChain:
     """
 
     def __init__(self):
-        """Initialize services"""
+        """Initialize service instances"""
         self.perplexity = PerplexityService()
         self.sports_api = APISportsBasketballService()
         self.supabase = SupabaseService()
+        self._sports_api_context = None
+
+    async def _ensure_sports_api(self):
+        """Ensure sports API is initialized in async context"""
+        if not self._sports_api_context:
+            self._sports_api_context = await self.sports_api.__aenter__()
+        return self._sports_api_context
+
+    async def _cleanup_sports_api(self):
+        """Cleanup sports API context if initialized"""
+        if self._sports_api_context:
+            await self.sports_api.__aexit__(None, None, None)
+            self._sports_api_context = None
 
     # Prompts moved to a separate section for better organization
     class Prompts:
@@ -213,6 +226,9 @@ class ResearchChain:
         # For deep research, add additional data sources
         if analysis.recommended_mode == ResearchMode.DEEP:
             if analysis.sport_type == SportType.BASKETBALL:
+                # Initialize sports API context
+                await self._ensure_sports_api()
+                
                 # Add sports API tasks for each team
                 for team in analysis.teams.values():
                     if team:
@@ -241,23 +257,27 @@ class ResearchChain:
                         )
                     ])
 
-        # Execute all tasks in parallel
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Error in data gathering task {i}: {str(result)}")
-            else:
-                content = result.model_dump() if hasattr(result, 'model_dump') else result
-                data_points.append(DataPoint(
-                    source=f"task_{i}",
-                    content=content,
-                    timestamp=datetime.utcnow(),
-                    confidence=0.9
-                ))
+        try:
+            # Execute all tasks in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Error in data gathering task {i}: {str(result)}")
+                else:
+                    content = result.model_dump() if hasattr(result, 'model_dump') else result
+                    data_points.append(DataPoint(
+                        source=f"task_{i}",
+                        content=content,
+                        timestamp=datetime.utcnow(),
+                        confidence=0.9
+                    ))
 
-        return data_points
+            return data_points
+        finally:
+            # Always cleanup sports API context after use
+            await self._cleanup_sports_api()
 
     @observe(name="analyze_data")
     async def _analyze_data(
@@ -347,7 +367,7 @@ class ResearchChain:
                 sources=sources,
                 metadata=metadata
             )
-            
+        
         except Exception as e:
             logger.error(f"Error processing research request: {str(e)}", exc_info=True)
             raise
