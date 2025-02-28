@@ -39,9 +39,9 @@ try:
 except Exception as e:
     logger.info(f"Not a Git repository or Git not available: {str(e)}")
 
-# Check for key files (but don't try to fix them - that's done by fix_directory_structure.py)
+# Check for key files (but don't try to fix them)
 logger.info("Checking for key files:")
-for file_pattern in ["app/functions/llm_functions.py", "app/models/betting_models.py"]:
+for file_pattern in ["app/workflows/research_chain.py", "app/models/research_models.py"]:
     if os.path.exists(file_pattern):
         logger.info(f"Found {file_pattern}")
         # Check file size

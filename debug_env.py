@@ -32,30 +32,30 @@ def debug_info():
             else:
                 print(f" - FILE: {item}")
     
+    # Check if workflows directory exists
+    workflows_path = os.path.join('app', 'workflows')
+    print(f"\nWorkflows directory exists: {os.path.exists(workflows_path)}")
+    if os.path.exists(workflows_path):
+        print("Workflows directory contents:")
+        for item in os.listdir(workflows_path):
+            print(f" - {item}")
+    
     # Print Python path
     print("\nPython path:")
     for path in sys.path:
         print(f" - {path}")
     
-    # Check if functions directory exists
-    functions_path = os.path.join('app', 'functions')
-    print(f"\nFunctions directory exists: {os.path.exists(functions_path)}")
-    if os.path.exists(functions_path):
-        print("Functions directory contents:")
-        for item in os.listdir(functions_path):
-            print(f" - {item}")
-    
     # Try to import using alternative approaches
     print("\nImport attempts:")
     try:
-        import app.functions
-        print(" - Direct import of app.functions: SUCCESS")
+        import app.workflows
+        print(" - Direct import of app.workflows: SUCCESS")
     except ImportError as e:
-        print(f" - Direct import of app.functions: FAILED - {str(e)}")
+        print(f" - Direct import of app.workflows: FAILED - {str(e)}")
     
     try:
-        spec = importlib.util.find_spec("app.functions")
-        print(f" - Find spec for app.functions: {'SUCCESS - ' + spec.origin if spec else 'FAILED - Not found'}")
+        spec = importlib.util.find_spec("app.workflows")
+        print(f" - Find spec for app.workflows: {'SUCCESS - ' + spec.origin if spec else 'FAILED - Not found'}")
     except Exception as e:
         print(f" - Find spec failed: {str(e)}")
     
