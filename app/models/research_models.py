@@ -167,7 +167,6 @@ class DeepResearchResponse(BaseModel):
 class ResearchResponse(BaseModel):
     """Final response model returned to the user"""
     summary: str
-    insights: List[Insight]
     recommendations: List[str]
     risk_factors: List[RiskFactor]
     sources: List[Source]

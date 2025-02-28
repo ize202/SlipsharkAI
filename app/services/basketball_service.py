@@ -286,8 +286,14 @@ class BasketballService:
             return {"error": f"Failed to get matchup data: {str(e)}"}
 
     @observe(name="get_league_data")
-    async def get_league_data(self, season: Optional[str] = None) -> Dict[str, Any]:
-        """Get general league data including standings and recent games"""
+    async def get_league_data(self, season: Optional[str] = None, limit_games: int = 10) -> Dict[str, Any]:
+        """
+        Get general league data including standings and recent games.
+        
+        Args:
+            season: Optional season to get data for. If not provided, uses current season.
+            limit_games: Maximum number of games to return (default 10).
+        """
         nba = await self._ensure_nba_service()
         
         # Use provided season or determine current season
@@ -297,14 +303,62 @@ class BasketballService:
             # Get standings and recent games
             tasks = [
                 nba.standings.get_standings("standard", season_to_use),
-                nba.games.list_games(season=season_to_use, last=15)  # Last 15 games
+                nba.games.list_games(season=season_to_use)
             ]
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
+            # Process standings - get only essential info
+            standings = []
+            if not isinstance(results[0], Exception):
+                for standing in results[0]:
+                    # Calculate win percentage manually
+                    total_games = standing.win.total + standing.loss.total
+                    win_percentage = standing.win.total / total_games if total_games > 0 else 0.0
+                    
+                    standings.append({
+                        "team": standing.team.name,
+                        "conference": standing.conference.name,
+                        "division": standing.division.name,
+                        "win": standing.win.total,
+                        "loss": standing.loss.total,
+                        "winPercentage": round(win_percentage, 3),
+                        "lastTenWin": standing.win.last_10,
+                        "lastTenLoss": standing.loss.last_10,
+                        "streak": standing.streak,
+                        "winStreak": standing.winStreak
+                    })
+            else:
+                standings = {"error": str(results[0])}
+            
+            # Process games - limit the number returned
+            games = []
+            if not isinstance(results[1], Exception):
+                # Sort games by date (most recent first) and take only the specified limit
+                sorted_games = sorted(
+                    results[1], 
+                    key=lambda x: x.date.start if x.date and x.date.start else "0000-00-00",
+                    reverse=True
+                )
+                
+                for game in sorted_games[:limit_games]:
+                    games.append({
+                        "id": game.id,
+                        "date": game.date.start if game.date else None,
+                        "home_team": game.teams.home.name,
+                        "away_team": game.teams.visitors.name,
+                        "home_score": game.scores.home.points if game.scores and game.scores.home else None,
+                        "away_score": game.scores.visitors.points if game.scores and game.scores.visitors else None,
+                        "status": game.status.long if game.status else None
+                    })
+            else:
+                games = {"error": str(results[1])}
+            
             return {
-                "standings": [s.model_dump() for s in results[0]] if not isinstance(results[0], Exception) else {"error": str(results[0])},
-                "recent_games": [g.model_dump() for g in results[1]] if not isinstance(results[1], Exception) else {"error": str(results[1])}
+                "standings": standings,
+                "recent_games": games,
+                "timestamp": datetime.now().isoformat(),
+                "confidence": 0.7  # Confidence score for the data
             }
             
         except Exception as e:
