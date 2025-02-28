@@ -1,11 +1,13 @@
 # Import config first to initialize LangTrace
 from app.config import *
 
-from fastapi import FastAPI, HTTPException, Request, Depends, Body
+from fastapi import FastAPI, HTTPException, Request, Depends, Body, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.models import SecuritySchemeIn, SecurityScheme
+from fastapi.security.api_key import APIKeyHeader
 from dotenv import load_dotenv
 import os
 from typing import Union, Dict, Any, Optional
@@ -14,7 +16,7 @@ from app.models.research_models import ResearchRequest, ResearchResponse
 from app.utils.cache import clear_cache, get_cache_stats
 from app.middleware.auth import APIKeyMiddleware
 from app.middleware.usage_tracking import UsageTrackingMiddleware, get_usage_stats
-from app.config.auth import verify_api_key
+from app.config.auth import verify_api_key, API_KEY_NAME
 from app.config.logging_config import configure_logging, get_logger
 from app.utils.error_handling import (
     APIError, 
@@ -51,6 +53,11 @@ app = FastAPI(
     - Real-time data from multiple sources
     - Context-aware responses
     - Suggested follow-up questions
+    
+    ## Authentication
+    
+    All API endpoints (except public ones like /health) require an API key.
+    Add your API key to the request header: `X-API-Key: your-api-key`
     """,
     version="1.0.0",
     docs_url="/docs",
@@ -84,6 +91,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Define API key security scheme for Swagger UI
+app.openapi_components = {
+    "securitySchemes": {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": API_KEY_NAME
+        }
+    }
+}
+
+# Apply security globally to all endpoints
+app.openapi_security = [{"ApiKeyAuth": []}]
 
 # Add auth middleware
 app.add_middleware(APIKeyMiddleware)
@@ -127,21 +148,29 @@ research_chain = ResearchChain()
     - Suggested follow-up questions
     - Context updates for conversation continuity
     """,
-    response_description="Detailed analysis of the sports betting query"
+    response_description="Detailed analysis of the sports betting query",
+    security=[{"ApiKeyAuth": []}]
 )
 async def research_endpoint(
     req: Request,
     request: ResearchRequest = Body(
         ...,
-        example={
-            "query": "Should I bet on the Lakers tonight?",
-            "mode": "deep",
-            "context": {
-                "teams": ["Lakers"],
-                "sport": "basketball"
+        examples={
+            "basic": {
+                "summary": "Basic query example",
+                "description": "A simple query about betting on a basketball team",
+                "value": {
+                    "query": "Should I bet on the Lakers tonight?",
+                    "mode": "deep",
+                    "context": {
+                        "teams": ["Lakers"],
+                        "sport": "basketball"
+                    }
+                }
             }
         }
-    )
+    ),
+    api_key: str = Security(verify_api_key)
 ):
     """Process a sports research request"""
     # Generate a request ID if one doesn't exist
@@ -201,9 +230,10 @@ async def health_check():
                 }
             }
         }
-    }
+    },
+    security=[{"ApiKeyAuth": []}]
 )
-async def cache_stats():
+async def cache_stats(api_key: str = Security(verify_api_key)):
     """Get cache statistics"""
     return await get_cache_stats()
 
@@ -221,9 +251,10 @@ async def cache_stats():
                 }
             }
         }
-    }
+    },
+    security=[{"ApiKeyAuth": []}]
 )
-async def clear_cache_endpoint():
+async def clear_cache_endpoint(api_key: str = Security(verify_api_key)):
     """Clear the cache"""
     await clear_cache()
     return {"status": "cache cleared"}
@@ -247,8 +278,9 @@ async def clear_cache_endpoint():
                 }
             }
         }
-    }
+    },
+    security=[{"ApiKeyAuth": []}]
 )
-async def usage_stats():
+async def usage_stats_endpoint(api_key: str = Security(verify_api_key)):
     """Get API usage statistics"""
     return await get_usage_stats() 
