@@ -18,7 +18,7 @@ EXTEND_RATE_LIMIT = os.getenv("EXTEND_RATE_LIMIT", "10/minute")    # Most restri
 
 # Initialize rate limiter
 limiter = Limiter(
-    key_func=get_remote_address,  # Use IP address as the rate limiting key
+    key_func=get_api_key,  # Use API key as the rate limiting key
     default_limits=[DEFAULT_RATE_LIMIT],
     storage_uri=os.getenv("REDIS_URL", "memory://"),  # Use Redis if available, otherwise in-memory
 )
@@ -38,4 +38,6 @@ def get_api_key(request):
     This allows different rate limits for different API keys.
     """
     from app.config.auth import API_KEY_NAME
-    return request.headers.get(API_KEY_NAME, "anonymous") 
+    api_key = request.headers.get(API_KEY_NAME, "anonymous")
+    logger.debug(f"Rate limiting key: {api_key}")
+    return api_key 

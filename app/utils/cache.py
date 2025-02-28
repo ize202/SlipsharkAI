@@ -267,36 +267,30 @@ def clear_cache(pattern: str = "*") -> None:
     if cleared_count > 0:
         logger.info(f"Cleared {cleared_count} memory cache entries matching pattern: {pattern}")
 
-def get_cache_stats() -> dict:
+async def get_cache_stats() -> dict:
     """Get cache statistics"""
     stats = {
-        "memory_cache": {
-            "status": "enabled",
-            "instances": len(memory_cache_instances),
-            "total_keys": sum(len(cache) for cache in memory_cache_instances.values())
-        }
+        "hits": 0,
+        "misses": 0,
+        "size": 0,
+        "memory_usage": "0 MB"
     }
     
+    # Get Redis stats if available
     if redis_client:
         try:
             info = redis_client.info()
-            stats["redis"] = {
-                "status": "enabled",
-                "used_memory": info.get("used_memory_human", "unknown"),
-                "connected_clients": info.get("connected_clients", 0),
-                "uptime_in_days": info.get("uptime_in_days", 0),
-                "total_keys": len(redis_client.keys("*"))
-            }
+            stats["hits"] = info.get("keyspace_hits", 0)
+            stats["misses"] = info.get("keyspace_misses", 0)
+            stats["size"] = redis_client.dbsize()
+            stats["memory_usage"] = f"{info.get('used_memory_human', '0B')}"
         except Exception as e:
-            stats["redis"] = {
-                "status": "error",
-                "error": str(e)
-            }
-    else:
-        stats["redis"] = {
-            "status": "disabled"
-        }
-    
+            logger.error(f"Error getting Redis stats: {str(e)}")
+            
+    # Add memory cache stats
+    for cache in memory_cache_instances.values():
+        stats["size"] += len(cache)
+        
     return stats
 
 # Memory-based LRU cache for environments without Redis

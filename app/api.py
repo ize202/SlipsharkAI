@@ -73,6 +73,9 @@ app = FastAPI(
 # Store environment in app state for error handlers
 app.state.environment = ENVIRONMENT
 
+# Add limiter to app state
+app.state.limiter = limiter
+
 # Register exception handlers
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
@@ -98,6 +101,20 @@ app.add_middleware(APIKeyMiddleware)
 # Add usage tracking middleware
 app.add_middleware(UsageTrackingMiddleware)
 
+# Initialize Redis client if URL is set
+if os.getenv("REDIS_URL"):
+    try:
+        import redis
+        app.state.redis = redis.from_url(os.getenv("REDIS_URL"))
+        app.state.redis.ping()  # Test connection
+        logger.info("Redis initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Redis: {str(e)}")
+        app.state.redis = None
+else:
+    logger.warning("REDIS_URL not set, running without Redis")
+    app.state.redis = None
+
 # Initialize research chain
 research_chain = ResearchChain()
 
@@ -122,7 +139,7 @@ research_chain = ResearchChain()
     """,
     response_description="Detailed analysis of the sports betting query"
 )
-@limiter.limit(ANALYZE_RATE_LIMIT, key_func=get_api_key)
+@limiter.limit(ANALYZE_RATE_LIMIT)
 async def research_endpoint(
     req: Request,
     request: ResearchRequest = Body(
@@ -140,6 +157,22 @@ async def research_endpoint(
     """Process a sports research request"""
     request_logger = get_logger("research", {"request_id": req.state.request_id})
     request_logger.info(f"Processing research request: {request.query[:50]}...")
+    
+    # Debug logging for rate limiting
+    request_logger.debug(f"Rate limit key: {get_api_key(req)}")
+    request_logger.debug(f"Rate limit remaining: {req.headers.get('X-RateLimit-Remaining')}")
+    request_logger.debug(f"Redis URL: {os.getenv('REDIS_URL')}")
+    
+    # Debug logging for Redis connection
+    if hasattr(app.state, "redis"):
+        request_logger.debug("Redis client exists in app state")
+        try:
+            app.state.redis.ping()
+            request_logger.debug("Redis connection is alive")
+        except Exception as e:
+            request_logger.error(f"Redis connection error: {str(e)}")
+    else:
+        request_logger.warning("No Redis client in app state")
     
     try:
         response = await research_chain.process_request(request)
