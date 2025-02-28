@@ -14,7 +14,6 @@ from app.models.research_models import ResearchRequest, ResearchResponse
 from app.utils.cache import clear_cache, get_cache_stats
 from app.middleware.auth import APIKeyMiddleware
 from app.middleware.usage_tracking import UsageTrackingMiddleware, get_usage_stats
-from app.config.rate_limit import limiter, ANALYZE_RATE_LIMIT, get_api_key, rate_limit_exceeded_handler
 from app.config.auth import verify_api_key
 from app.config.logging_config import configure_logging, get_logger
 from app.utils.error_handling import (
@@ -22,13 +21,11 @@ from app.utils.error_handling import (
     api_error_handler, 
     validation_exception_handler,
     http_exception_handler,
-    general_exception_handler,
-    RateLimitAPIError
+    general_exception_handler
 )
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 import logging
 import time
+import uuid
 
 # Load environment variables
 load_dotenv()
@@ -73,15 +70,11 @@ app = FastAPI(
 # Store environment in app state for error handlers
 app.state.environment = ENVIRONMENT
 
-# Add limiter to app state
-app.state.limiter = limiter
-
 # Register exception handlers
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
-app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # Add CORS middleware
 app.add_middleware(
@@ -91,9 +84,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Add rate limiting middleware
-app.add_middleware(SlowAPIMiddleware)
 
 # Add auth middleware
 app.add_middleware(APIKeyMiddleware)
@@ -139,7 +129,6 @@ research_chain = ResearchChain()
     """,
     response_description="Detailed analysis of the sports betting query"
 )
-@limiter.limit(ANALYZE_RATE_LIMIT)
 async def research_endpoint(
     req: Request,
     request: ResearchRequest = Body(
@@ -155,24 +144,10 @@ async def research_endpoint(
     )
 ):
     """Process a sports research request"""
-    request_logger = get_logger("research", {"request_id": req.state.request_id})
+    # Generate a request ID if one doesn't exist
+    request_id = getattr(req.state, 'request_id', str(uuid.uuid4()))
+    request_logger = get_logger("research", {"request_id": request_id})
     request_logger.info(f"Processing research request: {request.query[:50]}...")
-    
-    # Debug logging for rate limiting
-    request_logger.debug(f"Rate limit key: {get_api_key(req)}")
-    request_logger.debug(f"Rate limit remaining: {req.headers.get('X-RateLimit-Remaining')}")
-    request_logger.debug(f"Redis URL: {os.getenv('REDIS_URL')}")
-    
-    # Debug logging for Redis connection
-    if hasattr(app.state, "redis"):
-        request_logger.debug("Redis client exists in app state")
-        try:
-            app.state.redis.ping()
-            request_logger.debug("Redis connection is alive")
-        except Exception as e:
-            request_logger.error(f"Redis connection error: {str(e)}")
-    else:
-        request_logger.warning("No Redis client in app state")
     
     try:
         response = await research_chain.process_request(request)
@@ -182,9 +157,9 @@ async def research_endpoint(
     except Exception as e:
         request_logger.error(f"Error processing research request: {str(e)}", exc_info=True)
         raise APIError(
+            message="Error processing research request",
             status_code=500,
-            detail="Error processing research request",
-            error_type="RESEARCH_ERROR"
+            error_code="RESEARCH_ERROR"
         )
 
 @app.get(

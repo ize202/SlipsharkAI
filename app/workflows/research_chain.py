@@ -77,7 +77,7 @@ class ResearchChain:
             "players": ["player1", "player2"],
             "bet_type": "spread",
             "odds_mentioned": "-5.5",
-            "game_date": "2024-02-24",
+            "game_date": "2024-02-24",  # Must be a string in ISO format (YYYY-MM-DD) or descriptive text like "tonight", "tomorrow"
             "required_data": ["team_stats", "player_stats", "odds"],
             "recommended_mode": "quick",
             "confidence_score": 0.85
