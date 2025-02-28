@@ -53,7 +53,7 @@ async def test_quick_research_caching():
     logger.info(f"Similar query duration: {similar_duration:.2f}s")
     
     # Get cache stats
-    cache_stats = get_cache_stats()
+    cache_stats = await get_cache_stats()
     logger.info(f"Cache stats after quick research test: {cache_stats}")
     
     # Assertions
