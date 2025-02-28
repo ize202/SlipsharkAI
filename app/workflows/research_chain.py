@@ -155,30 +155,47 @@ class ResearchChain:
                 basketball = await self._ensure_basketball_service()
                 
                 # Get team data if teams are mentioned
-                for team in analysis.teams.values():
+                team_data = {}
+                for team_key, team in analysis.teams.items():
                     if team:
-                        team_data = await basketball.get_team_data(team)
-                        if team_data:
+                        team_data[team] = await basketball.get_team_data(team)
+                        if team_data[team]:
                             data_points.append(DataPoint(
                                 source="basketball_api",
-                                content=team_data,
+                                content=team_data[team],
                                 confidence=0.9
                             ))
                 
                 # Get player data if players are mentioned
                 for player in analysis.players:
-                    player_data = await basketball.get_player_data(player)
-                    if player_data:
-                        data_points.append(DataPoint(
-                            source="basketball_api",
-                            content=player_data,
-                            confidence=0.9
-                        ))
+                    # Try to find the player's team from context or analysis
+                    player_team = None
+                    if request.context and request.context.teams:
+                        player_team = request.context.teams[0]
+                    elif team_data:
+                        player_team = list(team_data.keys())[0]
+                    
+                    if player_team:
+                        try:
+                            player_data = await basketball.get_player_data(player, player_team)
+                            if player_data:
+                                data_points.append(DataPoint(
+                                    source="basketball_api",
+                                    content=player_data,
+                                    confidence=0.9
+                                ))
+                        except Exception as e:
+                            logger.error(f"Error getting data for player {player}: {str(e)}")
+                            data_points.append(DataPoint(
+                                source="basketball_api",
+                                content={"error": f"Failed to get data for player {player}: {str(e)}"},
+                                confidence=0.9
+                            ))
             
             return data_points
                 
         except Exception as e:
-            logger.error(f"Error gathering data: {str(e)}", exc_info=True)
+            logger.error(f"Error gathering data: {str(e)}")
             raise
         finally:
             if analysis.recommended_mode == ResearchMode.DEEP:
@@ -206,10 +223,11 @@ class ResearchChain:
                 temperature=0.7
             )
             
-            # Ensure game_date is a string if present
-            if "context_updates" in result and "game_date" in result["context_updates"]:
-                if isinstance(result["context_updates"]["game_date"], datetime):
-                    result["context_updates"]["game_date"] = result["context_updates"]["game_date"].isoformat()
+            # Ensure all datetime objects in context_updates are converted to strings
+            if "context_updates" in result:
+                for key, value in result["context_updates"].items():
+                    if isinstance(value, datetime):
+                        result["context_updates"][key] = value.isoformat()
             
             return ResearchResponse(
                 response=result["response"],

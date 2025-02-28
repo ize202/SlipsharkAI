@@ -26,14 +26,24 @@ class Message(BaseModel):
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
 class ConversationContext(BaseModel):
     """Essential context for maintaining conversation memory"""
     teams: List[str] = Field(default_factory=list)
     players: List[str] = Field(default_factory=list)
     sport: Optional[SportType] = None
-    game_date: Optional[str] = None
+    game_date: Optional[str] = None  # Must be string, not datetime
     bet_type: Optional[str] = None
     last_query: Optional[str] = None
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 class QueryAnalysis(BaseModel):
     """Analysis of user's query"""
@@ -43,10 +53,15 @@ class QueryAnalysis(BaseModel):
     players: List[str] = Field(default_factory=list)
     bet_type: Optional[str] = None
     odds_mentioned: Optional[str] = None
-    game_date: Optional[str] = None
+    game_date: Optional[str] = None  # Must be string, not datetime
     required_data: List[str] = Field(default_factory=list)
     recommended_mode: ResearchMode
     confidence_score: float = Field(ge=0.0, le=1.0)
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 class DataPoint(BaseModel):
     """Data gathered from various sources"""
@@ -79,6 +94,10 @@ class ResearchResponse(BaseModel):
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
     class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
         json_schema_extra = {
             "example": {
                 "response": "The Lakers are 5.5-point favorites tonight against the Pistons. They've been playing well lately, winning 7 of their last 8 games.",
