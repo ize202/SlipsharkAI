@@ -312,27 +312,48 @@ class BasketballService:
             standings = []
             if not isinstance(results[0], Exception):
                 for standing in results[0]:
-                    # Calculate win percentage manually
-                    total_games = standing.win.total + standing.loss.total
-                    win_percentage = standing.win.total / total_games if total_games > 0 else 0.0
-                    
                     standings.append({
-                        "team": standing.team.name,
-                        "conference": standing.conference.name,
-                        "conference_rank": standing.conference.rank,
-                        "division": standing.division.name,
-                        "division_rank": standing.division.rank,
-                        "win": standing.win.total,
-                        "loss": standing.loss.total,
-                        "winPercentage": round(win_percentage, 3),
-                        "lastTenWin": standing.win.lastTen or 0,
-                        "lastTenLoss": standing.loss.lastTen or 0,
+                        "league": standing.league,
+                        "season": standing.season,
+                        "team": {
+                            "id": standing.team.id,
+                            "name": standing.team.name,
+                            "nickname": standing.team.nickname,
+                            "code": standing.team.code,
+                            "logo": standing.team.logo
+                        },
+                        "conference": {
+                            "name": standing.conference.name,
+                            "rank": standing.conference.rank,
+                            "win": standing.conference.win,
+                            "loss": standing.conference.loss
+                        },
+                        "division": {
+                            "name": standing.division.name,
+                            "rank": standing.division.rank,
+                            "win": standing.division.win,
+                            "loss": standing.division.loss,
+                            "gamesBehind": standing.division.gamesBehind
+                        },
+                        "win": {
+                            "home": standing.win.home,
+                            "away": standing.win.away,
+                            "total": standing.win.total,
+                            "percentage": standing.win.percentage,
+                            "lastTen": standing.win.lastTen
+                        },
+                        "loss": {
+                            "home": standing.loss.home,
+                            "away": standing.loss.away,
+                            "total": standing.loss.total,
+                            "percentage": standing.loss.percentage,
+                            "lastTen": standing.loss.lastTen
+                        },
+                        "gamesBehind": standing.gamesBehind,
                         "streak": standing.streak,
-                        "winStreak": standing.winStreak
+                        "winStreak": standing.winStreak,
+                        "tieBreakerPoints": standing.tieBreakerPoints
                     })
-                
-                # Sort standings by conference rank
-                standings.sort(key=lambda x: (x["conference"], x["conference_rank"]))
             else:
                 standings = {"error": str(results[0])}
             
@@ -361,8 +382,14 @@ class BasketballService:
                 games = {"error": str(results[1])}
             
             return {
-                "standings": standings,
-                "recent_games": games,
+                "get": "standings/",
+                "parameters": {
+                    "league": "standard",
+                    "season": season_to_use
+                },
+                "errors": [],
+                "results": len(standings),
+                "response": standings,
                 "timestamp": datetime.now().isoformat(),
                 "confidence": 0.7  # Confidence score for the data
             }
