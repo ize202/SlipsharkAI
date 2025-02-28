@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 from dataclasses import dataclass
 from langfuse.decorators import observe
+from ..utils.cache import redis_cache
+import hashlib
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -241,6 +243,34 @@ class Standing(BaseModel):
     winStreak: bool
     tieBreakerPoints: Optional[float] = None
 
+def normalize_cache_key(params: Dict[str, Any]) -> str:
+    """
+    Normalize parameters for cache key generation.
+    - Sorts dictionary keys
+    - Converts values to strings
+    - Handles nested dictionaries
+    - Normalizes case for string values
+    """
+    def normalize_value(value: Any) -> str:
+        if isinstance(value, dict):
+            return normalize_cache_key(value)
+        elif isinstance(value, (list, tuple, set)):
+            return ','.join(sorted(str(x).lower() for x in value))
+        elif isinstance(value, str):
+            return value.lower()
+        return str(value)
+
+    if not params:
+        return ""
+    
+    normalized = {
+        str(k).lower(): normalize_value(v)
+        for k, v in sorted(params.items())
+        if v is not None
+    }
+    
+    return hashlib.md5(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
+
 class NBAApiClient:
     """Low-level NBA API client"""
     
@@ -268,6 +298,7 @@ class NBAApiClient:
             await self.client.aclose()
             self.client = None
 
+    @redis_cache(ttl=300, prefix="nba_api")  # 5 minute default cache
     async def _make_request(
         self, 
         endpoint: str, 
@@ -278,12 +309,19 @@ class NBAApiClient:
             raise RuntimeError("Client not initialized. Use async with context manager.")
             
         params = params or {}
+        
+        # Generate normalized cache key
+        cache_key = normalize_cache_key({
+            "endpoint": endpoint,
+            "params": params
+        })
+        
         max_retries = 3
         retry_delay = 1  # seconds
         
         for attempt in range(max_retries):
             try:
-                logger.debug(f"Making request to {endpoint} with params: {params}")
+                logger.debug(f"Making request to {endpoint} with params: {params} (cache_key: {cache_key})")
                 response = await self.client.get(endpoint, params=params)
                 response.raise_for_status()
                 
@@ -301,6 +339,8 @@ class NBAApiClient:
                         raise RateLimitError(f"Rate limit exceeded: {error_msg}")
                     raise NBAApiError(f"API returned errors: {error_msg}")
                 
+                # Add cache key to response for debugging
+                data["_cache_key"] = cache_key
                 return data
                 
             except httpx.HTTPStatusError as e:
@@ -330,11 +370,13 @@ class NBATeamService:
         self.client = client
         self._team_cache: Dict[str, Team] = {}
         
+    @redis_cache(ttl=86400, prefix="nba_teams")  # 24 hour cache for teams
     async def list_teams(self, league: str = "standard") -> List[Team]:
         """Get list of NBA teams"""
         data = await self.client._make_request("teams", {"league": league})
         return [Team(**team) for team in data.get("response", [])]
         
+    @redis_cache(ttl=3600, prefix="nba_team_stats")  # 1 hour cache for team stats
     async def get_team_statistics(
         self, 
         team_id: int, 
@@ -356,6 +398,7 @@ class NBAGameService:
     def __init__(self, client: NBAApiClient):
         self.client = client
         
+    @redis_cache(ttl=300, prefix="nba_games")  # 5 minute cache for games
     async def list_games(
         self,
         season: str = "2023",
@@ -379,6 +422,7 @@ class NBAGameService:
         data = await self.client._make_request("games", params)
         return [Game(**game) for game in data.get("response", [])]
         
+    @redis_cache(ttl=3600, prefix="nba_game_stats")  # 1 hour cache for game stats
     async def get_game_statistics(self, game_id: int) -> Dict[str, Any]:
         """Get statistics for a specific game"""
         data = await self.client._make_request(
@@ -415,6 +459,7 @@ class NBAPlayerService:
     def __init__(self, client: NBAApiClient):
         self.client = client
         
+    @redis_cache(ttl=86400, prefix="nba_players")  # 24 hour cache for player info
     async def get_players(
         self,
         season: str,
@@ -437,6 +482,7 @@ class NBAPlayerService:
         data = await self.client._make_request("players", params)
         return [Player(**player) for player in data.get("response", [])]
         
+    @redis_cache(ttl=3600, prefix="nba_player_stats")  # 1 hour cache for player stats
     async def get_player_statistics(
         self,
         player_id: Optional[int] = None,
@@ -476,6 +522,7 @@ class NBAStandingService:
     def __init__(self, client: NBAApiClient):
         self.client = client
         
+    @redis_cache(ttl=3600, prefix="nba_standings")  # 1 hour cache for standings
     async def get_standings(
         self,
         league: str,

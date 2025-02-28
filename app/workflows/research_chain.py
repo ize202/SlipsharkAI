@@ -18,6 +18,7 @@ from app.services.supabase import SupabaseService
 from app.utils.llm_utils import structured_llm_call, json_serialize
 from app.config import get_logger
 from langfuse.decorators import observe
+from app.utils.cache import redis_cache
 
 logger = get_logger(__name__)
 
@@ -44,12 +45,6 @@ class ResearchChain:
             self.basketball = BasketballService()
             await self.basketball.__aenter__()
         return self.basketball
-
-    async def _cleanup_basketball_service(self):
-        """Cleanup basketball service if initialized"""
-        if self.basketball:
-            await self.basketball.__aexit__(None, None, None)
-            self.basketball = None
 
     class Prompts:
         QUERY_ANALYSIS = """You are a sports betting query analyzer. Your task is to analyze betting queries and extract structured information.
@@ -144,9 +139,11 @@ class ResearchChain:
                 search_recency="day"
             )
             if web_result:
+                # Handle both object and dictionary cases (for cached results)
+                content = web_result.get('content') if isinstance(web_result, dict) else web_result.content
                 data_points.append(DataPoint(
                     source="perplexity",
-                    content=web_result.content,
+                    content=content,
                     confidence=0.8
                 ))
             
@@ -198,7 +195,7 @@ class ResearchChain:
             logger.error(f"Error gathering data: {str(e)}")
             raise
         finally:
-            if analysis.recommended_mode == ResearchMode.DEEP:
+            if analysis.recommended_mode == ResearchMode.DEEP and self.basketball:
                 await self._cleanup_basketball_service()
 
     @observe(name="generate_response")
@@ -242,6 +239,7 @@ class ResearchChain:
             raise
 
     @observe(name="process_request")
+    @redis_cache(ttl=3600, prefix="research_chain", serialize_json=True)
     async def process_request(self, request: ResearchRequest) -> ResearchResponse:
         """Process a research request"""
         try:
@@ -269,3 +267,12 @@ class ResearchChain:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._cleanup_basketball_service()
+
+    async def _cleanup_basketball_service(self):
+        """Clean up basketball service resources"""
+        if self.basketball:
+            try:
+                await self.basketball.__aexit__(None, None, None)
+                self.basketball = None
+            except Exception as e:
+                logger.error(f"Error cleaning up basketball service: {str(e)}")
