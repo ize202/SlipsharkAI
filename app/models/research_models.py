@@ -1,8 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Any
 from datetime import datetime
-import json
 
 class SportType(str, Enum):
     BASKETBALL = "basketball"
@@ -17,152 +16,89 @@ class ResearchMode(str, Enum):
     QUICK = "quick"
     DEEP = "deep"
 
-class Citation(BaseModel):
-    """Citation for a source used in research"""
-    url: str = Field(description="URL of the source")
-    title: Optional[str] = Field(default=None, description="Title of the source")
-    snippet: Optional[str] = Field(default=None, description="Relevant snippet from the source")
-    published_date: Optional[str] = Field(default=None, description="Publication date of the source")
-    
-    def model_dump(self) -> dict:
-        """Convert the model to a dictionary"""
-        return {
-            "url": self.url,
-            "title": self.title,
-            "snippet": self.snippet,
-            "published_date": self.published_date
-        }
+class MessageRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
 
-class QueryContext(BaseModel):
-    """Optional context for the research request"""
-    previous_query_id: Optional[str] = None
-    user_id: Optional[str] = None
-    user_preferences: Optional[Dict[str, Any]] = None
-    bet_history: Optional[Dict[str, Any]] = None
+class Message(BaseModel):
+    """Single message in the conversation"""
+    role: MessageRole
+    content: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-class ResearchContext(BaseModel):
-    """Context information for research processing"""
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    previous_queries: Optional[List[str]] = Field(default_factory=list)
-    preferences: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    bet_history: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
-
-class ResearchRequest(BaseModel):
-    """Main request model for the research endpoint"""
-    query: str = Field(..., description="The user's sports betting query")
-    mode: ResearchMode = Field(default=ResearchMode.AUTO, description="Research mode to use")
-    context: Optional[ResearchContext] = Field(default=None, description="Optional research context")
+class ConversationContext(BaseModel):
+    """Essential context for maintaining conversation memory"""
+    teams: List[str] = Field(default_factory=list)
+    players: List[str] = Field(default_factory=list)
+    sport: Optional[SportType] = None
+    game_date: Optional[str] = None
+    bet_type: Optional[str] = None
+    last_query: Optional[str] = None
 
 class QueryAnalysis(BaseModel):
-    """Output of the first LLM call - Query Analysis"""
+    """Analysis of user's query"""
     raw_query: str
     sport_type: SportType
     teams: Dict[str, Optional[str]] = Field(default_factory=dict)
     players: List[str] = Field(default_factory=list)
     bet_type: Optional[str] = None
-    odds_mentioned: Optional[str] = Field(default=None, description="Any specific odds or lines mentioned")
-    game_date: Optional[str] = Field(default=None, description="Date of the game if mentioned")
-    matchup_focus: Optional[str] = Field(default=None, description="Specific matchup or aspect of interest")
+    odds_mentioned: Optional[str] = None
+    game_date: Optional[str] = None
     required_data: List[str] = Field(default_factory=list)
     recommended_mode: ResearchMode
     confidence_score: float = Field(ge=0.0, le=1.0)
 
 class DataPoint(BaseModel):
-    """Structure for individual pieces of gathered data"""
+    """Data gathered from various sources"""
     source: str
-    content: Union[str, dict]
-    timestamp: datetime
+    content: Any
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
-class RiskFactor(BaseModel):
-    """Structure for identified risk factors"""
-    factor: str
-    severity: str
-    mitigation: Optional[str] = None
-
-class Source(BaseModel):
-    """Structure for data sources used"""
-    name: str
-    type: str
-    url: Optional[str] = None
-    timestamp: datetime
-    snippet: Optional[str] = None
-    data: Optional[Dict[str, Any]] = Field(default=None, description="Raw data from the source")
-
-class UserStats(BaseModel):
-    """Model for user betting statistics"""
-    user_id: str
-    entry_type: str
-    sport: str
-    period: str
-    total_entries: Optional[int]
-    won_entries: Optional[int]
-    total_stake: Optional[float]
-    total_payout: Optional[float]
-    roi: Optional[float]
-    updated_at: Optional[datetime]
-
-class UserPreferences(BaseModel):
-    """Model for user betting preferences"""
-    user_id: str
-    favorite_teams: List[str]
-    favorite_leagues: List[str]
-    stake_limits: Dict[str, float]
-    notification_preferences: Dict[str, bool]
-    updated_at: datetime
-
-class BetHistory(BaseModel):
-    """Model for user betting history"""
-    id: str
-    user_id: str
-    sport: str
-    bet_type: str
-    selection: str
-    odds: float
-    stake: float
-    potential_payout: float
-    outcome: Optional[str] = None
-    placed_at: datetime
-    settled_at: Optional[datetime] = None
-
-class ResearchMetadata(BaseModel):
-    """Metadata about the research process"""
-    query_id: str
-    mode_used: ResearchMode
-    processing_time: float
-    confidence_score: float = Field(ge=0.0, le=1.0)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-class QuickResearchResponse(BaseModel):
-    """Response model for quick research mode"""
-    summary: str = Field(description="Brief summary of findings")
-    # confidence_score: float = Field(description="Confidence in the analysis")
-    # deep_research_recommended: bool = Field(description="Whether deep research is recommended")
-    citations: List[Citation] = Field(default=[], description="Sources cited in the research")
-    related_questions: List[str] = Field(default=[], description="Related betting questions to consider")
-    last_updated: str = Field(description="Timestamp of when this research was conducted")
-    conversational_response: Optional[str] = Field(default=None, description="Natural language conversational response")
-
-class DeepResearchResponse(BaseModel):
-    """Response model for deep research mode"""
-    summary: str = Field(description="Executive summary of the analysis")
-    risk_factors: List[RiskFactor] = Field(description="Identified risk factors")
-    # recommended_bet: Optional[str] = Field(description="Recommended betting action")
-    # odds_analysis: Dict[str, Any] = Field(description="Detailed odds analysis")
-    # historical_context: Optional[str] = Field(description="Relevant historical betting patterns")
-    # confidence_score: float = Field(description="Overall confidence in the analysis (0-1)")
-    citations: List[Citation] = Field(description="All sources used in the analysis")
-    last_updated: str = Field(description="Timestamp of when this research was conducted")
-    metadata: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata about the analysis")
-    conversational_response: Optional[str] = Field(default=None, description="Natural language conversational response")
+class ResearchRequest(BaseModel):
+    """Research request with context"""
+    query: str = Field(description="The user's sports betting query")
+    mode: ResearchMode = Field(default=ResearchMode.AUTO)
+    context: Optional[ConversationContext] = None
+    conversation_history: Optional[List[Message]] = Field(
+        default_factory=list,
+        max_items=5
+    )
 
 class ResearchResponse(BaseModel):
-    """Final response model returned to the user"""
-    summary: str
-    recommendations: List[str]
-    risk_factors: List[RiskFactor]
-    sources: List[Source]
-    metadata: ResearchMetadata
-    data: Optional[Dict[str, Any]] = Field(default=None, description="Additional data from sources") 
+    """Unified research response"""
+    response: str = Field(description="Natural language response")
+    data_points: List[DataPoint] = Field(default_factory=list)
+    suggested_questions: List[str] = Field(default_factory=list)
+    context_updates: Optional[ConversationContext] = None
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "response": "The Lakers are 5.5-point favorites tonight against the Pistons. They've been playing well lately, winning 7 of their last 8 games.",
+                "data_points": [
+                    {
+                        "source": "odds_api",
+                        "content": {"spread": -5.5, "moneyline": -240},
+                        "confidence": 0.95
+                    }
+                ],
+                "suggested_questions": [
+                    "How have the Lakers performed against the spread?",
+                    "Any injury concerns for either team?"
+                ],
+                "context_updates": {
+                    "teams": ["Lakers", "Pistons"],
+                    "sport": "basketball",
+                    "game_date": "tonight",
+                    "bet_type": "spread"
+                },
+                "confidence_score": 0.85
+            }
+        } 

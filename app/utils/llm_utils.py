@@ -31,6 +31,19 @@ def json_serialize(obj):
     """Serialize an object to JSON, handling datetime objects"""
     return json.dumps(obj, cls=DateTimeEncoder)
 
+def parse_datetime(obj):
+    """Parse datetime strings in a dictionary"""
+    if isinstance(obj, dict):
+        return {k: parse_datetime(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [parse_datetime(item) for item in obj]
+    elif isinstance(obj, str):
+        try:
+            return datetime.fromisoformat(obj)
+        except (ValueError, TypeError):
+            return obj
+    return obj
+
 @observe(name="structured_llm_call")
 async def structured_llm_call(
     prompt: str,
@@ -98,7 +111,10 @@ def clean_json_string(json_str: str) -> str:
 def validate_json_response(response: str) -> Dict[str, Any]:
     """Validate and parse a JSON response string"""
     try:
-        return json.loads(response)
+        # First parse the JSON normally
+        parsed = json.loads(response)
+        # Then try to convert any ISO datetime strings to datetime objects
+        return parse_datetime(parsed)
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON response: {str(e)}")
         logger.error(f"Raw response: {response}")

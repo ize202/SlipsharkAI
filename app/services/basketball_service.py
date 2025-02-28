@@ -163,16 +163,14 @@ class BasketballService:
             # Try searching by first name first (which is usually more unique for NBA players)
             players = await nba.players.get_players(
                 season=season_to_use,
-                search=name_parts[0],  # Use first name for search
-                team_id=team_id
+                search=name_parts[0]  # Use first name for search
             )
             
             # If no results or multiple results, try full name search
             if not players or (len(players) > 1 and len(name_parts) > 1):
                 players = await nba.players.get_players(
                     season=season_to_use,
-                    search=player_name,  # Try full name
-                    team_id=team_id
+                    search=player_name  # Try full name
                 )
             
             if not players:
@@ -191,11 +189,19 @@ class BasketballService:
             
             # Get player statistics
             try:
-                player_stats = await nba.players.get_player_statistics(
-                    player_id=player.id,
-                    season=season_to_use,
-                    team_id=team_id
-                )
+                # If we don't have a team_id, get the player's current team from their info
+                if not team_id and player.team:
+                    team_id = player.team.id
+                
+                if team_id:
+                    player_stats = await nba.players.get_player_statistics(
+                        player_id=player.id,
+                        season=season_to_use,
+                        team_id=team_id
+                    )
+                else:
+                    logger.warning(f"No team found for player {player_name}, cannot get statistics")
+                    player_stats = []
             except Exception as stats_error:
                 logger.error(f"Error getting statistics for player {player_name}: {str(stats_error)}")
                 player_stats = []
