@@ -52,7 +52,21 @@ TEST_QUERIES = {
     "deep_player_impact": "How will LeBron's injury affect the Lakers' chances against the Timberwolves? Need comprehensive analysis of team performance with and without him.",
     "deep_team_form": "Do a deep analysis of the Celtics' current form, their last 5 games performance, and upcoming matchup against the Bucks.",
     "deep_standings": "Analyze the Warriors' playoff chances based on their current standing, remaining schedule, and recent performance trends.",
-    "deep_scoring": "Should I bet the over/under for the Nuggets vs Suns game? Need detailed scoring trends and defensive stats for both teams."
+    "deep_scoring": "Should I bet the over/under for the Nuggets vs Suns game? Need detailed scoring trends and defensive stats for both teams.",
+    # Adding new test queries for different endpoints
+    "player_stats": "What are Giannis Antetokounmpo's stats in the last 5 games? Need his scoring, rebounds, and efficiency numbers.",
+    "team_comparison": "Compare the Nets and Heat's defensive stats this season, especially their points allowed and opponent field goal percentage.",
+    "injury_impact": "With Joel Embiid out, how have the 76ers performed in games without him this season?",
+    "h2h_analysis": "What's the head-to-head record between the Knicks and Bulls this season? Include scoring margins and key player performances.",
+    "season_trends": "How have the Grizzlies performed against the spread in their last 10 home games?",
+    "player_props": "What's Luka Doncic's average points, assists, and rebounds in games against the Pelicans this season?",
+    "team_streaks": "Are the Thunder on any significant winning or scoring streaks? Need their last 10 games performance.",
+    "division_stats": "How are the teams in the Pacific Division performing against each other this season?",
+    "league_overview": "Give me a comprehensive overview of the current NBA season standings, including division leaders and recent game results.",
+    "season_info": "What NBA seasons are available in the database? I need historical season data.",
+    "league_info": "What different NBA leagues and competitions are available in the database?",
+    "team_deep_stats": "I need detailed offensive and defensive statistics for the Boston Celtics this season, including fast break points and points in the paint.",
+    "game_full_stats": "Show me the complete statistical breakdown of the last Lakers vs Warriors game, including player performances and team stats."
 }
 
 # Default to deep research mode for all queries to ensure we test the sports API integration

@@ -157,29 +157,54 @@ class BasketballService:
                 if team_info:
                     team_id = team_info["id"]
             
-            # Search for player
+            # Split player name into parts for more accurate search
+            name_parts = player_name.split()
+            
+            # Try searching by first name first (which is usually more unique for NBA players)
             players = await nba.players.get_players(
-                season=season_to_use, 
-                search=player_name,
+                season=season_to_use,
+                search=name_parts[0],  # Use first name for search
                 team_id=team_id
             )
+            
+            # If no results or multiple results, try full name search
+            if not players or (len(players) > 1 and len(name_parts) > 1):
+                players = await nba.players.get_players(
+                    season=season_to_use,
+                    search=player_name,  # Try full name
+                    team_id=team_id
+                )
             
             if not players:
                 return {"error": f"Player not found: {player_name}"}
-                
-            # Take the first match
-            player = players[0]
+            
+            # Filter players to find exact match if possible
+            exact_match = None
+            for player in players:
+                full_name = f"{player.firstname} {player.lastname}".lower()
+                if full_name == player_name.lower():
+                    exact_match = player
+                    break
+            
+            # Use exact match if found, otherwise use first result
+            player = exact_match or players[0]
             
             # Get player statistics
-            player_stats = await nba.players.get_player_statistics(
-                player_id=player.id,
-                season=season_to_use,
-                team_id=team_id
-            )
+            try:
+                player_stats = await nba.players.get_player_statistics(
+                    player_id=player.id,
+                    season=season_to_use,
+                    team_id=team_id
+                )
+            except Exception as stats_error:
+                logger.error(f"Error getting statistics for player {player_name}: {str(stats_error)}")
+                player_stats = []
             
             return {
                 "player_info": player.model_dump(),
-                "statistics": [s.model_dump() for s in player_stats]
+                "statistics": [s.model_dump() for s in player_stats] if player_stats else [],
+                "search_results": len(players),  # Include number of matches found
+                "exact_match_found": exact_match is not None  # Include whether this was an exact match
             }
             
         except Exception as e:

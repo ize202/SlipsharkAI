@@ -445,6 +445,10 @@ class NBAPlayerService:
         season: Optional[str] = None
     ) -> List[PlayerStatistics]:
         """Get player statistics with optional filters"""
+        # API requires at least one parameter
+        if not any([player_id, game_id, team_id, season]):
+            raise ValueError("At least one parameter (player_id, game_id, team_id, or season) is required")
+            
         params = {}
         if player_id:
             params["id"] = player_id
@@ -455,8 +459,16 @@ class NBAPlayerService:
         if season:
             params["season"] = season
             
-        data = await self.client._make_request("players/statistics", params)
-        return [PlayerStatistics(**stats) for stats in data.get("response", [])]
+        try:
+            data = await self.client._make_request("players/statistics", params)
+            if not data.get("response"):
+                logger.warning(f"No statistics found for player (id={player_id}, game={game_id}, team={team_id}, season={season})")
+                return []
+                
+            return [PlayerStatistics(**stats) for stats in data.get("response", [])]
+        except Exception as e:
+            logger.error(f"Error getting player statistics: {str(e)}")
+            raise NBAApiError(f"Failed to get player statistics: {str(e)}")
 
 class NBAStandingService:
     """Service for NBA standings operations"""
