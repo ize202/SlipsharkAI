@@ -319,15 +319,20 @@ class BasketballService:
                     standings.append({
                         "team": standing.team.name,
                         "conference": standing.conference.name,
+                        "conference_rank": standing.conference.rank,
                         "division": standing.division.name,
+                        "division_rank": standing.division.rank,
                         "win": standing.win.total,
                         "loss": standing.loss.total,
                         "winPercentage": round(win_percentage, 3),
-                        "lastTenWin": standing.win.last_10,
-                        "lastTenLoss": standing.loss.last_10,
+                        "lastTenWin": standing.win.lastTen or 0,
+                        "lastTenLoss": standing.loss.lastTen or 0,
                         "streak": standing.streak,
                         "winStreak": standing.winStreak
                     })
+                
+                # Sort standings by conference rank
+                standings.sort(key=lambda x: (x["conference"], x["conference_rank"]))
             else:
                 standings = {"error": str(results[0])}
             
@@ -337,19 +342,20 @@ class BasketballService:
                 # Sort games by date (most recent first) and take only the specified limit
                 sorted_games = sorted(
                     results[1], 
-                    key=lambda x: x.date.start if x.date and x.date.start else "0000-00-00",
+                    key=lambda x: x.date["start"] if isinstance(x.date, dict) and "start" in x.date else "0000-00-00",
                     reverse=True
                 )
                 
                 for game in sorted_games[:limit_games]:
+                    game_dict = game.model_dump()  # Convert to dictionary first
                     games.append({
                         "id": game.id,
-                        "date": game.date.start if game.date else None,
-                        "home_team": game.teams.home.name,
-                        "away_team": game.teams.visitors.name,
-                        "home_score": game.scores.home.points if game.scores and game.scores.home else None,
-                        "away_score": game.scores.visitors.points if game.scores and game.scores.visitors else None,
-                        "status": game.status.long if game.status else None
+                        "date": game_dict["date"]["start"] if isinstance(game_dict["date"], dict) and "start" in game_dict["date"] else None,
+                        "home_team": game_dict["teams"]["home"]["name"] if "home" in game_dict["teams"] else None,
+                        "away_team": game_dict["teams"]["visitors"]["name"] if "visitors" in game_dict["teams"] else None,
+                        "home_score": game_dict["scores"]["home"]["points"] if game_dict["scores"] and "home" in game_dict["scores"] else None,
+                        "away_score": game_dict["scores"]["visitors"]["points"] if game_dict["scores"] and "visitors" in game_dict["scores"] else None,
+                        "status": game_dict["status"]["long"] if "status" in game_dict and "long" in game_dict["status"] else None
                     })
             else:
                 games = {"error": str(results[1])}

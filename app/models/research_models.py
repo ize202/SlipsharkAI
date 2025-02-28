@@ -96,6 +96,7 @@ class Source(BaseModel):
     url: Optional[str] = None
     timestamp: datetime
     snippet: Optional[str] = None
+    data: Optional[Dict[str, Any]] = Field(default=None, description="Raw data from the source")
 
 class UserStats(BaseModel):
     """Model for user betting statistics"""
@@ -170,4 +171,5 @@ class ResearchResponse(BaseModel):
     recommendations: List[str]
     risk_factors: List[RiskFactor]
     sources: List[Source]
-    metadata: ResearchMetadata 
+    metadata: ResearchMetadata
+    data: Optional[Dict[str, Any]] = Field(default=None, description="Additional data from sources") 

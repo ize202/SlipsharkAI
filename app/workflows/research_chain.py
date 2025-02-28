@@ -73,9 +73,25 @@ class ResearchChain:
         7. Any specific matchups or aspects of interest
         8. Season or year mentioned (e.g., "2022-2023 season" or "last season")
         
-        Also determine if this query requires:
-        - Quick Research: Basic odds and recent performance
-        - Deep Research: Detailed analysis, historical data, multiple data sources
+        Research Mode Decision Rules:
+        Quick Research (ONLY for these cases):
+        - General news or updates about teams/players without needing specific stats
+        - Simple yes/no questions that can be answered with recent news
+        - Basic information that can be found through web search
+        - Questions about game schedules or times
+        
+        Deep Research (Required for ANY of these cases):
+        - Anything involving odds, lines, or betting markets
+        - Requests for standings, statistics, or records
+        - Team performance analysis or comparisons
+        - Player statistics or performance metrics
+        - Historical data or trends
+        - Matchup analysis
+        - Injury impact assessment
+        - League-wide data or standings
+        - Win/loss records or streaks
+        - Specific game or player props
+        - Questions about betting strategy or patterns
         
         Return ONLY a JSON object with this exact structure:
         {
@@ -453,23 +469,26 @@ class ResearchChain:
                 timestamp=datetime.utcnow()
             )
 
-            # Create sources
-            sources = [
-                Source(
-                    name=dp.source,
-                    type="api" if "api" in dp.source else "web_search",
-                    timestamp=dp.timestamp
-                ) for dp in data_points
-            ]
-
             # Return final response
             return ResearchResponse(
                 summary=enhanced_result.get("conversational_response", analysis_result.summary),
                 insights=analysis_result.insights if hasattr(analysis_result, 'insights') else [],
                 recommendations=enhanced_result.get("next_steps", []),
                 risk_factors=analysis_result.risk_factors if hasattr(analysis_result, 'risk_factors') else [],
-                sources=sources,
-                metadata=metadata
+                sources=[
+                    Source(
+                        name=dp.source,
+                        type="api" if "api" in dp.source else "web_search",
+                        timestamp=dp.timestamp,
+                        data=dp.content if isinstance(dp.content, dict) else None
+                    ) for dp in data_points
+                ],
+                metadata=metadata,
+                data={
+                    dp.source: dp.content
+                    for dp in data_points
+                    if isinstance(dp.content, dict)
+                }
             )
         
         except Exception as e:

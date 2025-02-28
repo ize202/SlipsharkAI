@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from pprint import pprint
 import time
+from typing import Dict, Any
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -78,13 +79,15 @@ TEST_QUERIES = {
     "season_info": "What NBA seasons are available in the database? I need historical season data.",
     "league_info": "What different NBA leagues and competitions are available in the database?",
     "team_deep_stats": "I need detailed offensive and defensive statistics for the Boston Celtics this season, including fast break points and points in the paint.",
-    "game_full_stats": "Show me the complete statistical breakdown of the last Lakers vs Warriors game, including player performances and team stats."
+    "game_full_stats": "Show me the complete statistical breakdown of the last Lakers vs Warriors game, including player performances and team stats.",
+    "league_standings": "Show me the current NBA standings with win-loss records and streaks",
+    "recent_games": "What are the most recent NBA game results?"
 }
 
 # Default to deep research mode for all queries to ensure we test the sports API integration
 DEFAULT_MODE = ResearchMode.DEEP
 
-async def process_request(query: str, mode: ResearchMode = ResearchMode.AUTO) -> None:
+async def process_request(query: str, mode: ResearchMode = ResearchMode.AUTO) -> Dict[str, Any]:
     """Process a research request and print the results."""
     logger.info("\n" + "=" * 80)
     logger.info(f"TESTING QUERY: '{query}'")
@@ -114,10 +117,8 @@ async def process_request(query: str, mode: ResearchMode = ResearchMode.AUTO) ->
         result = await chain.process_request(request)
         processing_time = time.time() - start_time
         
-        # Log raw standings data if available
-        for source in result.sources:
-            if source.name == 'league_data_basketball':
-                logger.debug(f"Raw standings data from source: {source}")
+        # Log raw data field
+        logger.debug(f"Raw data field: {result.data}")
         
         logger.debug("Request processed successfully")
         logger.info(f"\nRESULTS (processed in {processing_time:.2f} seconds):")
@@ -135,45 +136,115 @@ async def process_request(query: str, mode: ResearchMode = ResearchMode.AUTO) ->
             
         if result.sources:
             print_section("SOURCES", [f"{source.name} ({source.type})" for source in result.sources])
+            
+            # For league data testing, print detailed standings if available
+            if "league_data_basketball" in result.data:
+                league_data = result.data["league_data_basketball"]
+                standings_data = league_data.get("standings", [])
+                if standings_data:
+                    print("\nSTANDINGS DATA")
+                    print("=" * 80)
+                    print(f"{'Team':<30} {'W-L':<10} {'Win%':<8} {'Last 10':<10} {'Streak':<8} {'Conf':<15}")
+                    print("-" * 80)
+                    
+                    # Sort standings by win percentage
+                    sorted_standings = sorted(standings_data, 
+                                           key=lambda x: x['winPercentage'], 
+                                           reverse=True)
+                    
+                    for team in sorted_standings:
+                        print(f"{team['team']:<30} "
+                              f"{team['win']}-{team['loss']:<8} "
+                              f"{team['winPercentage']:.3f}  "
+                              f"{team['lastTenWin']}-{team['lastTenLoss']:<6} "
+                              f"{'W' if team['winStreak'] else 'L'}{team['streak']:<6} "
+                              f"{team['conference']}")
+                    print("=" * 80)
+                    
+                    # Print recent games if available
+                    recent_games = league_data.get("recent_games", [])
+                    if recent_games and not isinstance(recent_games, dict):  # Check it's not an error dict
+                        print("\nRECENT GAMES")
+                        print("=" * 80)
+                        for game in recent_games:
+                            status = game['status'] or 'Unknown'
+                            if game['home_score'] is not None and game['away_score'] is not None:
+                                print(f"{game['date']}: {game['away_team']} {game['away_score']} @ {game['home_team']} {game['home_score']} ({status})")
+                            else:
+                                print(f"{game['date']}: {game['away_team']} @ {game['home_team']} ({status})")
+                        print("=" * 80)
 
         return result
 
-async def run_all_tests():
-    """Run all test queries"""
-    results = {}
+async def run_single_test(query: str, mode: ResearchMode = ResearchMode.AUTO) -> None:
+    """Run a single test with the specified query"""
+    print_section("TEST QUERY", query)
     
-    # Test auto mode with different queries
-    for name, query in TEST_QUERIES.items():
-        if name != "explicit_mode_quick" and name != "explicit_mode_deep":
-            results[f"auto_{name}"] = await process_request(query)
+    start_time = time.time()
+    result = await process_request(query, mode)
+    processing_time = time.time() - start_time
     
-    # Test explicit quick mode
-    results["explicit_quick"] = await process_request(
-        TEST_QUERIES["explicit_mode_quick"], 
-        mode=ResearchMode.QUICK
-    )
+    print_section("RESULTS", f"(processed in {processing_time:.2f} seconds):")
+    print(f"Mode used: {result.metadata.mode_used}")
+    print(f"Confidence score: {result.metadata.confidence_score:.2f}\n")
     
-    # Test explicit deep mode
-    results["explicit_deep"] = await process_request(
-        TEST_QUERIES["explicit_mode_deep"], 
-        mode=ResearchMode.DEEP
-    )
+    if result.summary:
+        print_section("SUMMARY", result.summary)
     
-    # Print summary of all tests
-    print("\n\nTEST SUMMARY:")
-    print(f"{'='*80}")
-    for name, response in results.items():
-        print(f"{name}: Mode={response.metadata.mode_used}, Time={response.metadata.processing_time:.2f}s, Confidence={response.metadata.confidence_score:.2f}")
+    if result.recommendations:
+        print_section("RECOMMENDATIONS", result.recommendations)
     
-    return results
+    if result.risk_factors:
+        print_section("RISK FACTORS", result.risk_factors)
+    
+    if result.sources:
+        print_section("SOURCES", [f"{source.name} ({source.type})" for source in result.sources])
+        
+        # For league data testing, print detailed standings if available
+        if "league_data_basketball" in result.data:
+            league_data = result.data["league_data_basketball"]
+            standings_data = league_data.get("standings", [])
+            if standings_data:
+                print("\nSTANDINGS DATA")
+                print("=" * 80)
+                print(f"{'Team':<30} {'W-L':<10} {'Win%':<8} {'Last 10':<10} {'Streak':<8} {'Conf':<15}")
+                print("-" * 80)
+                
+                # Sort standings by win percentage
+                sorted_standings = sorted(standings_data, 
+                                       key=lambda x: x['winPercentage'], 
+                                       reverse=True)
+                
+                for team in sorted_standings:
+                    print(f"{team['team']:<30} "
+                          f"{team['win']}-{team['loss']:<8} "
+                          f"{team['winPercentage']:.3f}  "
+                          f"{team['lastTenWin']}-{team['lastTenLoss']:<6} "
+                          f"{'W' if team['winStreak'] else 'L'}{team['streak']:<6} "
+                          f"{team['conference']}")
+                print("=" * 80)
+                
+                # Print recent games if available
+                recent_games = league_data.get("recent_games", [])
+                if recent_games and not isinstance(recent_games, dict):  # Check it's not an error dict
+                    print("\nRECENT GAMES")
+                    print("=" * 80)
+                    for game in recent_games:
+                        status = game['status'] or 'Unknown'
+                        if game['home_score'] is not None and game['away_score'] is not None:
+                            print(f"{game['date']}: {game['away_team']} {game['away_score']} @ {game['home_team']} {game['home_score']} ({status})")
+                        else:
+                            print(f"{game['date']}: {game['away_team']} @ {game['home_team']} ({status})")
+                    print("=" * 80)
 
-async def run_single_test(query_type: str = "quick_basketball"):
-    """Run a single test query"""
-    if query_type in TEST_QUERIES:
-        return await process_request(TEST_QUERIES[query_type])
-    else:
-        print(f"Query type '{query_type}' not found. Available types: {list(TEST_QUERIES.keys())}")
-        return None
+async def run_all_tests() -> None:
+    """Run all test queries"""
+    for query_name, query in TEST_QUERIES.items():
+        logger.info("=" * 80)
+        logger.info(f"Testing query: {query_name}")
+        logger.info("=" * 80)
+        await run_single_test(query)
+        logger.info("\n")
 
 if __name__ == "__main__":
     # Get command line arguments
