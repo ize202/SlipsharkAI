@@ -48,16 +48,17 @@ except ImportError as e:
 
 # Test queries for different scenarios
 TEST_QUERIES = {
-    "quick_basketball": "How are the Lakers performing recently?",
-    "deep_basketball": "Should I bet on the Lakers considering their last 5 games, current injuries, and their matchup against the Warriors?",
-    "player_focused": "How has LeBron James been performing in his recent games?",
-    "team_comparison": "Compare the Celtics and Bucks for betting purposes.",
-    "season_specific": "How have the Nuggets performed this season?",
-    "explicit_mode_quick": "Give me a quick overview of the Suns' recent performance.",
-    "explicit_mode_deep": "Do a deep analysis of the Heat's chances against the Knicks tomorrow."
+    "deep_matchup": "Should I bet on the Lakers vs Warriors game tonight? I need a detailed analysis of their head-to-head matchups, team stats, and current form.",
+    "deep_player_impact": "How will LeBron's injury affect the Lakers' chances against the Timberwolves? Need comprehensive analysis of team performance with and without him.",
+    "deep_team_form": "Do a deep analysis of the Celtics' current form, their last 5 games performance, and upcoming matchup against the Bucks.",
+    "deep_standings": "Analyze the Warriors' playoff chances based on their current standing, remaining schedule, and recent performance trends.",
+    "deep_scoring": "Should I bet the over/under for the Nuggets vs Suns game? Need detailed scoring trends and defensive stats for both teams."
 }
 
-async def test_research_workflow(query: str, mode: ResearchMode = ResearchMode.AUTO):
+# Default to deep research mode for all queries to ensure we test the sports API integration
+DEFAULT_MODE = ResearchMode.DEEP
+
+async def test_research_workflow(query: str, mode: ResearchMode = DEFAULT_MODE):
     """Test the research workflow with a given query and mode"""
     logger.info(f"\n{'='*80}")
     logger.info(f"TESTING QUERY: '{query}'")

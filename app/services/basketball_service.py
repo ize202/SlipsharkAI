@@ -205,18 +205,31 @@ class BasketballService:
             team1_id = team1_info["id"]
             team2_id = team2_info["id"]
             
-            # Get games between these teams
-            games = await nba.games.list_games(
+            # Get games for both teams
+            team1_games = await nba.games.list_games(
                 season=season_to_use,
-                team_ids=[team1_id, team2_id]
+                team_id=team1_id
+            )
+            team2_games = await nba.games.list_games(
+                season=season_to_use,
+                team_id=team2_id
             )
             
-            # Filter for games between these two teams specifically
+            # Combine and filter for games between these two teams
+            all_games = team1_games + team2_games
             matchup_games = [
-                g.model_dump() for g in games 
-                if (g.teams.home.id == team1_id and g.teams.visitors.id == team2_id) or
-                   (g.teams.home.id == team2_id and g.teams.visitors.id == team1_id)
+                g.model_dump() for g in all_games 
+                if (g.teams["home"]["id"] == team1_id and g.teams["visitors"]["id"] == team2_id) or
+                   (g.teams["home"]["id"] == team2_id and g.teams["visitors"]["id"] == team1_id)
             ]
+            
+            # Remove duplicates (games appearing in both lists)
+            seen_ids = set()
+            unique_matchup_games = []
+            for game in matchup_games:
+                if game["id"] not in seen_ids:
+                    seen_ids.add(game["id"])
+                    unique_matchup_games.append(game)
             
             # Get team stats for comparison
             team_tasks = [
@@ -229,16 +242,16 @@ class BasketballService:
             return {
                 "team1": team_results[0],
                 "team2": team_results[1],
-                "matchup_games": matchup_games,
+                "matchup_games": unique_matchup_games,
                 "head_to_head_summary": {
-                    "total_games": len(matchup_games),
-                    "team1_wins": sum(1 for g in matchup_games if 
-                        (g["teams"]["home"]["id"] == team1_id and g["score"]["home"]["points"] > g["score"]["visitors"]["points"]) or
-                        (g["teams"]["visitors"]["id"] == team1_id and g["score"]["visitors"]["points"] > g["score"]["home"]["points"])
+                    "total_games": len(unique_matchup_games),
+                    "team1_wins": sum(1 for g in unique_matchup_games if 
+                        (g["teams"]["home"]["id"] == team1_id and g["scores"]["home"]["points"] > g["scores"]["visitors"]["points"]) or
+                        (g["teams"]["visitors"]["id"] == team1_id and g["scores"]["visitors"]["points"] > g["scores"]["home"]["points"])
                     ),
-                    "team2_wins": sum(1 for g in matchup_games if 
-                        (g["teams"]["home"]["id"] == team2_id and g["score"]["home"]["points"] > g["score"]["visitors"]["points"]) or
-                        (g["teams"]["visitors"]["id"] == team2_id and g["score"]["visitors"]["points"] > g["score"]["home"]["points"])
+                    "team2_wins": sum(1 for g in unique_matchup_games if 
+                        (g["teams"]["home"]["id"] == team2_id and g["scores"]["home"]["points"] > g["scores"]["visitors"]["points"]) or
+                        (g["teams"]["visitors"]["id"] == team2_id and g["scores"]["visitors"]["points"] > g["scores"]["home"]["points"])
                     )
                 }
             }

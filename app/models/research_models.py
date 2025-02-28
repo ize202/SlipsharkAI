@@ -154,11 +154,10 @@ class QuickResearchResponse(BaseModel):
 class DeepResearchResponse(BaseModel):
     """Response model for deep research mode"""
     summary: str = Field(description="Executive summary of the analysis")
-    insights: List[Insight] = Field(description="Key betting insights with supporting data")
     risk_factors: List[RiskFactor] = Field(description="Identified risk factors")
     recommended_bet: Optional[str] = Field(description="Recommended betting action")
     odds_analysis: Dict[str, Any] = Field(description="Detailed odds analysis")
-    historical_context: Optional[str] = Field(description="Relevant historical betting patterns")
+    # historical_context: Optional[str] = Field(description="Relevant historical betting patterns")
     confidence_score: float = Field(description="Overall confidence in the analysis (0-1)")
     citations: List[Citation] = Field(description="All sources used in the analysis")
     last_updated: str = Field(description="Timestamp of when this research was conducted")

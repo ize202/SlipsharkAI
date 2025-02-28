@@ -166,7 +166,10 @@ class ResearchChain:
                 "value_assessment": "Value analysis"
             },
             "confidence_score": 0.8,
-            "citations": []
+            "citations": [],
+            "metadata": {},
+            "last_updated": "2024-02-27T23:37:45Z",
+            "conversational_response": "Natural language version of the analysis"
         }"""
 
         RESPONSE_GENERATION = """You are a professional sports betting analyst having a conversation with a bettor.
@@ -310,42 +313,42 @@ class ResearchChain:
                     pass
             
             # Add user data if context is available
-            if request.context and request.context.user_id:
-                try:
-                    user_tasks = [
-                        self.supabase.get_user_bets(
-                            request.context.user_id,
-                            sport=str(analysis.sport_type),
-                            days_back=30
-                        ),
-                        self.supabase.get_user_stats(
-                            request.context.user_id,
-                            sport=str(analysis.sport_type)
-                        ),
-                        self.supabase.get_similar_bets(
-                            sport=str(analysis.sport_type),
-                            bet_type=analysis.bet_type if analysis.bet_type else "any",
-                            days_back=30
-                        )
-                    ]
+            # if request.context and request.context.user_id:
+            #     try:
+            #         user_tasks = [
+            #             self.supabase.get_user_bets(
+            #                 request.context.user_id,
+            #                 sport=str(analysis.sport_type),
+            #                 days_back=30
+            #             ),
+            #             self.supabase.get_user_stats(
+            #                 request.context.user_id,
+            #                 sport=str(analysis.sport_type)
+            #             ),
+            #             self.supabase.get_similar_bets(
+            #                 sport=str(analysis.sport_type),
+            #                 bet_type=analysis.bet_type if analysis.bet_type else "any",
+            #                 days_back=30
+            #             )
+            #         ]
                     
-                    # Execute user data tasks
-                    user_results = await asyncio.gather(*user_tasks, return_exceptions=True)
+            #         # Execute user data tasks
+            #         user_results = await asyncio.gather(*user_tasks, return_exceptions=True)
                     
-                    # Process user results
-                    for i, result in enumerate(user_results):
-                        if isinstance(result, Exception):
-                            logger.error(f"Error in user data task {i}: {str(result)}")
-                        else:
-                            source_name = ["user_bets", "user_stats", "similar_bets"][i]
-                            data_points.append(DataPoint(
-                                source=source_name,
-                                content=result,
-                                timestamp=datetime.utcnow(),
-                                confidence=0.7
-                            ))
-                except Exception as e:
-                    logger.error(f"Error gathering user data: {str(e)}", exc_info=True)
+            #         # Process user results
+            #         for i, result in enumerate(user_results):
+            #             if isinstance(result, Exception):
+            #                 logger.error(f"Error in user data task {i}: {str(result)}")
+            #             else:
+            #                 source_name = ["user_bets", "user_stats", "similar_bets"][i]
+            #                 data_points.append(DataPoint(
+            #                     source=source_name,
+            #                     content=result,
+            #                     timestamp=datetime.utcnow(),
+            #                     confidence=0.7
+            #                 ))
+            #     except Exception as e:
+            #         logger.error(f"Error gathering user data: {str(e)}", exc_info=True)
 
         return data_points
 
