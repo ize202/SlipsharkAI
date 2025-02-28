@@ -396,4 +396,32 @@ class BasketballService:
             
         except Exception as e:
             logger.error(f"Error getting league data: {str(e)}")
-            return {"error": f"Failed to get league data: {str(e)}"} 
+            return {"error": f"Failed to get league data: {str(e)}"}
+
+    @observe(name="get_game_statistics")
+    async def get_game_statistics(self, game_id: int) -> Dict[str, Any]:
+        """
+        Get statistics for a specific game.
+        
+        Args:
+            game_id: The ID of the game to get statistics for.
+            
+        Returns:
+            Dictionary containing game statistics or error message.
+        """
+        nba = await self._ensure_nba_service()
+        
+        try:
+            # Get game statistics
+            game_stats = await nba.games.get_game_statistics(game_id)
+            
+            return {
+                "game_id": game_id,
+                "statistics": game_stats,
+                "timestamp": datetime.now().isoformat(),
+                "confidence": 0.9
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting game statistics for game {game_id}: {str(e)}")
+            return {"error": f"Failed to get game statistics: {str(e)}"} 
