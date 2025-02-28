@@ -23,9 +23,6 @@ class PerplexityResponse(BaseModel):
     content: str
     citations: Optional[List[Citation]] = Field(default=[])
     related_questions: Optional[List[str]] = Field(default=[])
-    key_points: Optional[List[str]] = Field(default=[])
-    confidence_score: Optional[float] = Field(default=0.5)
-    deep_research_recommended: Optional[bool] = Field(default=False)
 
 class PerplexityService:
     """Service for interacting with Perplexity AI API"""

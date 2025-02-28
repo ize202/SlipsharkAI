@@ -75,13 +75,6 @@ class DataPoint(BaseModel):
     timestamp: datetime
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
-class Insight(BaseModel):
-    """Structure for individual betting insights"""
-    category: str
-    content: str
-    impact: str
-    confidence: float = Field(ge=0.0, le=1.0)
-    supporting_data: List[str] = Field(default_factory=list)
 
 class RiskFactor(BaseModel):
     """Structure for identified risk factors"""
@@ -145,8 +138,8 @@ class ResearchMetadata(BaseModel):
 class QuickResearchResponse(BaseModel):
     """Response model for quick research mode"""
     summary: str = Field(description="Brief summary of findings")
-    confidence_score: float = Field(description="Confidence in the analysis")
-    deep_research_recommended: bool = Field(description="Whether deep research is recommended")
+    # confidence_score: float = Field(description="Confidence in the analysis")
+    # deep_research_recommended: bool = Field(description="Whether deep research is recommended")
     citations: List[Citation] = Field(default=[], description="Sources cited in the research")
     related_questions: List[str] = Field(default=[], description="Related betting questions to consider")
     last_updated: str = Field(description="Timestamp of when this research was conducted")
@@ -156,10 +149,10 @@ class DeepResearchResponse(BaseModel):
     """Response model for deep research mode"""
     summary: str = Field(description="Executive summary of the analysis")
     risk_factors: List[RiskFactor] = Field(description="Identified risk factors")
-    recommended_bet: Optional[str] = Field(description="Recommended betting action")
-    odds_analysis: Dict[str, Any] = Field(description="Detailed odds analysis")
+    # recommended_bet: Optional[str] = Field(description="Recommended betting action")
+    # odds_analysis: Dict[str, Any] = Field(description="Detailed odds analysis")
     # historical_context: Optional[str] = Field(description="Relevant historical betting patterns")
-    confidence_score: float = Field(description="Overall confidence in the analysis (0-1)")
+    # confidence_score: float = Field(description="Overall confidence in the analysis (0-1)")
     citations: List[Citation] = Field(description="All sources used in the analysis")
     last_updated: str = Field(description="Timestamp of when this research was conducted")
     metadata: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata about the analysis")
