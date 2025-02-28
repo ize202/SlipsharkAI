@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
-from fastapi.openapi.models import SecuritySchemeIn, SecurityScheme
 from fastapi.security.api_key import APIKeyHeader
 from dotenv import load_dotenv
 import os
