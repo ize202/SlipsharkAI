@@ -1,7 +1,7 @@
 # Import config first to initialize LangTrace
 from app.config import *
 
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -46,8 +46,28 @@ if not os.getenv("OPENAI_API_KEY"):
 
 app = FastAPI(
     title="Sports Research AI",
-    description="AI-powered sports research and analysis system",
-    version="1.0.0"
+    description="""
+    AI-powered sports research and analysis system.
+    
+    Features:
+    - Quick and deep research modes for sports analysis
+    - Real-time data from multiple sources
+    - Context-aware responses
+    - Suggested follow-up questions
+    """,
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {
+            "name": "Research",
+            "description": "Sports research and analysis endpoints"
+        },
+        {
+            "name": "System",
+            "description": "System health and maintenance endpoints"
+        }
+    ]
 )
 
 # Store environment in app state for error handlers
@@ -81,19 +101,43 @@ app.add_middleware(UsageTrackingMiddleware)
 # Initialize research chain
 research_chain = ResearchChain()
 
-@app.post("/research", response_model=ResearchResponse)
-@limiter.limit(ANALYZE_RATE_LIMIT, key_func=get_api_key)
-async def research_endpoint(request: ResearchRequest, req: Request):
-    """
-    Unified research endpoint that handles both quick and deep research modes.
+@app.post(
+    "/research", 
+    response_model=ResearchResponse,
+    tags=["Research"],
+    summary="Analyze sports betting query",
+    description="""
+    Process a sports betting research query and return detailed analysis.
     
-    Args:
-        request: ResearchRequest containing the query and mode
-        req: FastAPI request object for rate limiting
-        
-    Returns:
-        ResearchResponse containing analysis and insights
-    """
+    The endpoint supports:
+    - Quick research mode: Basic web search and quick analysis
+    - Deep research mode: Comprehensive analysis with sports API data
+    - Auto mode: System decides based on query complexity
+    
+    Returns detailed response with:
+    - Natural language analysis
+    - Supporting data points
+    - Suggested follow-up questions
+    - Context updates for conversation continuity
+    """,
+    response_description="Detailed analysis of the sports betting query"
+)
+@limiter.limit(ANALYZE_RATE_LIMIT, key_func=get_api_key)
+async def research_endpoint(
+    req: Request,
+    request: ResearchRequest = Body(
+        ...,
+        example={
+            "query": "Should I bet on the Lakers tonight?",
+            "mode": "deep",
+            "context": {
+                "teams": ["Lakers"],
+                "sport": "basketball"
+            }
+        }
+    )
+):
+    """Process a sports research request"""
     request_logger = get_logger("research", {"request_id": req.state.request_id})
     request_logger.info(f"Processing research request: {request.query[:50]}...")
     
@@ -110,23 +154,93 @@ async def research_endpoint(request: ResearchRequest, req: Request):
             error_type="RESEARCH_ERROR"
         )
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["System"],
+    summary="System health check",
+    response_model=dict,
+    responses={
+        200: {
+            "description": "System is healthy",
+            "content": {
+                "application/json": {
+                    "example": {"status": "healthy"}
+                }
+            }
+        }
+    }
+)
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
 
-@app.get("/cache/stats")
+@app.get(
+    "/cache/stats",
+    tags=["System"],
+    summary="Get cache statistics",
+    response_model=dict,
+    responses={
+        200: {
+            "description": "Cache statistics",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "hits": 150,
+                        "misses": 50,
+                        "size": 200,
+                        "memory_usage": "1.2MB"
+                    }
+                }
+            }
+        }
+    }
+)
 async def cache_stats():
     """Get cache statistics"""
     return await get_cache_stats()
 
-@app.post("/cache/clear")
+@app.post(
+    "/cache/clear",
+    tags=["System"],
+    summary="Clear system cache",
+    response_model=dict,
+    responses={
+        200: {
+            "description": "Cache cleared successfully",
+            "content": {
+                "application/json": {
+                    "example": {"status": "cache cleared"}
+                }
+            }
+        }
+    }
+)
 async def clear_cache_endpoint():
     """Clear the cache"""
     await clear_cache()
     return {"status": "cache cleared"}
 
-@app.get("/usage")
+@app.get(
+    "/usage",
+    tags=["System"],
+    summary="Get API usage statistics",
+    response_model=dict,
+    responses={
+        200: {
+            "description": "API usage statistics",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total_requests": 1000,
+                        "requests_today": 100,
+                        "unique_users": 50,
+                        "average_response_time": "0.5s"
+                    }
+                }
+            }
+        }
+    }
+)
 async def usage_stats():
     """Get API usage statistics"""
     return await get_usage_stats() 
