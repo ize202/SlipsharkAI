@@ -148,8 +148,7 @@ research_chain = ResearchChain()
     - Suggested follow-up questions
     - Context updates for conversation continuity
     """,
-    response_description="Detailed analysis of the sports betting query",
-    security=[{"ApiKeyAuth": []}]
+    response_description="Detailed analysis of the sports betting query"
 )
 async def research_endpoint(
     req: Request,
@@ -169,8 +168,7 @@ async def research_endpoint(
                 }
             }
         }
-    ),
-    api_key: str = Security(verify_api_key)
+    )
 ):
     """Process a sports research request"""
     # Generate a request ID if one doesn't exist
@@ -230,10 +228,9 @@ async def health_check():
                 }
             }
         }
-    },
-    security=[{"ApiKeyAuth": []}]
+    }
 )
-async def cache_stats(api_key: str = Security(verify_api_key)):
+async def cache_stats():
     """Get cache statistics"""
     return await get_cache_stats()
 
@@ -251,10 +248,9 @@ async def cache_stats(api_key: str = Security(verify_api_key)):
                 }
             }
         }
-    },
-    security=[{"ApiKeyAuth": []}]
+    }
 )
-async def clear_cache_endpoint(api_key: str = Security(verify_api_key)):
+async def clear_cache_endpoint():
     """Clear the cache"""
     await clear_cache()
     return {"status": "cache cleared"}
@@ -278,9 +274,8 @@ async def clear_cache_endpoint(api_key: str = Security(verify_api_key)):
                 }
             }
         }
-    },
-    security=[{"ApiKeyAuth": []}]
+    }
 )
-async def usage_stats_endpoint(api_key: str = Security(verify_api_key)):
+async def usage_stats_endpoint():
     """Get API usage statistics"""
     return await get_usage_stats() 
