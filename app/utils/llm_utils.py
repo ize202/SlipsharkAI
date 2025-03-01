@@ -51,8 +51,6 @@ def parse_datetime(obj):
 async def structured_llm_call(
     prompt: str,
     messages: List[Dict[str, str]],
-    temperature: float = 0.7,
-    max_tokens: int = 2000,
     model: str = MODEL,
     should_validate_json: bool = True
 ) -> Dict[str, Any]:

@@ -59,8 +59,7 @@ class ResearchChain:
             
             analysis_result = await structured_llm_call(
                 prompt=compiled_prompt,
-                messages=[{"role": "user", "content": request.query}],
-                temperature=0.1
+                messages=[{"role": "user", "content": request.query}]
             )
             
             # Mode Decision Logic
@@ -168,8 +167,7 @@ class ResearchChain:
             
             result = await structured_llm_call(
                 prompt=compiled_prompt,
-                messages=[{"role": "user", "content": json.dumps(data_context)}],
-                temperature=0.7
+                messages=[{"role": "user", "content": json.dumps(data_context)}]
             )
             
             # Ensure all datetime objects in context_updates are converted to strings
