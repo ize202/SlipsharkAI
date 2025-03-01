@@ -16,6 +16,7 @@ from app.services.perplexity import PerplexityService
 from app.services.basketball_service import BasketballService
 from app.services.supabase import SupabaseService
 from app.utils.llm_utils import structured_llm_call, json_serialize
+from app.utils.prompt_manager import get_query_analysis_prompt, get_response_generation_prompt
 from app.config import get_logger
 from langfuse.decorators import observe
 from app.utils.cache import redis_cache
@@ -46,68 +47,18 @@ class ResearchChain:
             await self.basketball.__aenter__()
         return self.basketball
 
-    class Prompts:
-        QUERY_ANALYSIS = """You are a sports betting query analyzer. Your task is to analyze betting queries and extract structured information.
-        
-        Extract the following information:
-        1. Sport type (e.g., basketball, football, etc.)
-        2. Teams mentioned (both teams if available)
-        3. Specific players mentioned
-        4. Type of bet (spread, moneyline, over/under, etc.)
-        5. Any specific odds or lines mentioned
-        6. Timeframe (when the game is)
-        
-        Research Mode Decision Rules:
-        - Quick Research: For general news, updates, schedules
-        - Deep Research: For odds, stats, analysis, or specific insights
-        
-        Return ONLY a JSON object with this exact structure (no comments allowed):
-        {
-            "raw_query": "the original query",
-            "sport_type": "basketball",
-            "teams": {
-                "team1": "full team name",
-                "team2": "full team name"
-            },
-            "players": ["player1", "player2"],
-            "bet_type": "spread",
-            "odds_mentioned": "-5.5",
-            "game_date": "2024-02-24",  # Must be a string in ISO format (YYYY-MM-DD) or descriptive text like "tonight", "tomorrow"
-            "required_data": ["team_stats", "player_stats", "odds"],
-            "recommended_mode": "quick",
-            "confidence_score": 0.85
-        }"""
-
-        RESPONSE_GENERATION = """You are a professional sports betting analyst having a conversation with a bettor.
-        Convert the gathered data into a natural, conversational response.
-        
-        Guidelines:
-        1. Use a conversational, friendly tone while maintaining professionalism
-        2. Directly address the user's specific question
-        3. Highlight the most important insights first
-        4. Include specific data points that support your analysis
-        5. Suggest relevant follow-up questions
-        
-        Return a JSON object with:
-        {
-            "response": "Natural language response",
-            "suggested_questions": ["question1", "question2"],
-            "confidence_score": 0.85,
-            "context_updates": {
-                "teams": ["team1", "team2"],
-                "players": ["player1", "player2"],
-                "sport": "basketball",
-                "game_date": "2024-02-24",
-                "bet_type": "spread"
-            }
-        }"""
-
     @observe(name="analyze_query")
     async def _analyze_query(self, request: ResearchRequest) -> QueryAnalysis:
         """[LLM Call 1] Analyze the user's query and determine research mode"""
         try:
+            # Get the current production prompt from Langfuse
+            prompt = get_query_analysis_prompt()
+            
+            # Compile the prompt with variables
+            compiled_prompt = prompt.compile(query=request.query)
+            
             analysis_result = await structured_llm_call(
-                prompt=self.Prompts.QUERY_ANALYSIS,
+                prompt=compiled_prompt,
                 messages=[{"role": "user", "content": request.query}],
                 temperature=0.1
             )
@@ -214,8 +165,14 @@ class ResearchChain:
                 "context": context.model_dump(mode='json') if context else {}
             }
             
+            # Get the current production prompt from Langfuse
+            prompt = get_response_generation_prompt()
+            
+            # Compile the prompt with variables
+            compiled_prompt = prompt.compile(data_context=json.dumps(data_context))
+            
             result = await structured_llm_call(
-                prompt=self.Prompts.RESPONSE_GENERATION,
+                prompt=compiled_prompt,
                 messages=[{"role": "user", "content": json.dumps(data_context)}],
                 temperature=0.7
             )
