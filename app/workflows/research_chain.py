@@ -85,18 +85,13 @@ class ResearchChain:
         
         # Always start with web search
         try:
-            web_result = await self.perplexity.quick_research(
-                query=analysis.raw_query,
-                search_recency="day"
-            )
-            if web_result:
-                # Handle both object and dictionary cases (for cached results)
-                content = web_result.get('content') if isinstance(web_result, dict) else web_result.content
-                data_points.append(DataPoint(
-                    source="perplexity",
-                    content=content,
-                    confidence=0.8
-                ))
+            # Let PerplexityService handle all the search details
+            perplexity_response = await self.perplexity.quick_research(query=analysis.raw_query)
+            data_points.append(DataPoint(
+                source="perplexity",
+                content=perplexity_response.content,
+                confidence=0.8
+            ))
             
             # For deep research, add sports API data
             if analysis.recommended_mode == ResearchMode.DEEP:
