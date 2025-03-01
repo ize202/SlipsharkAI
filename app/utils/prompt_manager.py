@@ -6,9 +6,9 @@ from langfuse import Langfuse
 from typing import Dict, Any, List
 import logging
 from app.config import get_logger
+from app.config.langfuse_init import langfuse
 
 logger = get_logger(__name__)
-langfuse = Langfuse()
 
 # Initialize prompts in Langfuse
 def initialize_research_prompts():
