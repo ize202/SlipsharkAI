@@ -79,8 +79,6 @@ async def structured_llm_call(
         completion = await async_client.chat.completions.create(
             model=model,
             messages=full_messages,
-            temperature=temperature,
-            max_tokens=max_tokens
         )
         
         # Extract usage information for Langfuse
