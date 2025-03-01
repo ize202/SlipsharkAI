@@ -5,10 +5,8 @@ import json
 import httpx
 from pydantic import BaseModel, Field
 from langfuse.decorators import observe
-from langfuse import Langfuse
 from ..models.research_models import QueryAnalysis, SportType
 from ..utils.cache import redis_cache, memory_cache
-from app.config.langfuse_init import langfuse
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -124,19 +122,9 @@ class PerplexityService:
             
             # Update Langfuse with usage information
             usage = data.get("usage", {})
-            langfuse.update_current_observation(
-                input=messages,
-                model=self.default_model,
-                metadata={
-                    "search_recency": search_recency
-                },
-                usage_details={
-                    "input": usage.get("prompt_tokens", 0),
-                    "output": usage.get("completion_tokens", 0),
-                    "total": usage.get("total_tokens", 0)
-                }
-            )
-
+            # The @observe decorator automatically creates the observation
+            # No need to explicitly update it as it's handled by the decorator
+            
             # Try to parse structured format, but fall back to raw content if not possible
             sections = content.split('\n')
             summary = ""

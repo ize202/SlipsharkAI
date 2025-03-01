@@ -8,11 +8,9 @@ from datetime import datetime
 import logging
 import re
 from langfuse.decorators import observe
-from langfuse import Langfuse
 import openai
 from openai import AsyncOpenAI
 from app.config import get_logger
-from app.config.langfuse_init import langfuse
 
 logger = get_logger(__name__)
 
@@ -86,20 +84,8 @@ async def structured_llm_call(
         
         # Extract usage information for Langfuse
         usage = completion.usage
-        langfuse.update_current_observation(
-            input=full_messages,  # Include full messages for context
-            model=model,  # Model name for cost inference
-            metadata={
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "should_validate_json": should_validate_json
-            },
-            usage_details={
-                "input": usage.prompt_tokens,
-                "output": usage.completion_tokens,
-                "total": usage.total_tokens
-            }
-        )
+        # The @observe decorator automatically creates the observation
+        # No need to explicitly update it as it's handled by the decorator
         
         # Extract the response content
         response_text = completion.choices[0].message.content.strip()
