@@ -31,7 +31,7 @@ class PerplexityService:
     def __init__(self, timeout: float = 120.0):
         """Initialize the service with API configuration"""
         self.base_url = "https://api.perplexity.ai/chat/completions"
-        self.default_model = "sonar"  # Using sonar-pro for deeper research capabilities
+        self.default_model = "sonar" 
         self.api_key = os.getenv("PERPLEXITY_API_KEY")
         if not self.api_key:
             raise ValueError("PERPLEXITY_API_KEY environment variable must be set")
@@ -58,47 +58,41 @@ class PerplexityService:
     async def quick_research(
         self,
         query: str,
-        system_prompt: Optional[str] = None,
         search_recency: str = "day"
     ) -> PerplexityResponse:
         """
         Perform quick research using Perplexity AI with web search capabilities.
-        Note: While we request structured output, the free tier may not always provide it.
         
         Args:
-            query: The user's query to research
-            system_prompt: Optional system prompt to guide the response
+            query: The search query
             search_recency: Time window for search results ('hour', 'day', 'week', 'month')
-            
-        Returns:
-            PerplexityResponse containing the research results. If structured format is not 
-            followed, the entire response will be in the content field with empty key_points.
         """
         try:
-            default_system_prompt = """You are a professional sports betting analyst providing real-time research.
-            Your task is to search for and analyze the most recent and relevant information about the query.
-            
-            Focus on:
-            1. Recent game results and performance trends
-            2. Latest injury updates or roster changes
-            3. Current betting lines and odds movements
-            4. Key matchup factors and statistics
-            5. Relevant news that could impact betting decisions (weather, venue changes, etc.)
-            
-            Keep your analysis factual and data-driven. Include specific numbers, dates, and sources when available.
-            Prioritize information from the last 24-48 hours, but include relevant historical context if important.
-            
-            Try to format your response like this (but provide useful information even if you can't follow this format exactly):
-            SUMMARY: [Concise overview of the most important findings]
-            KEY POINTS:
-            - [Recent fact/update with specific details]
-            - [Key statistic or trend]
-            - [Important news or development]
-            - [Any other critical information]"""
-            
+            # Define our consistent system prompt for sports betting analysis
+            system_prompt = """You are a professional sports betting analyst.                                                
+                                    Format your responses in this structure:
+                                    SUMMARY: [A clear, data-driven conclusion]
+                                    KEY POINTS:
+                                    - [Specific fact with numbers where relevant]
+                                    - [Another specific fact with numbers where relevant]
+
+                                    Tone and Style Rules:
+                                    1. Be precise and factual
+                                    2. Always include specific numbers and statistics
+                                    3. Maintain a professional, analytical tone
+                                    4. Present information objectively without speculation
+                                    5. Structure information in order of importance"""
+
             messages = [
-                {"role": "system", "content": system_prompt or default_system_prompt},
-                {"role": "user", "content": query}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"""Search for and analyze:
+                                    1. Recent game results and performance trends
+                                    2. Latest injury updates or roster changes
+                                    3. Current betting lines and odds movements
+                                    4. Key matchup factors and statistics
+                                    5. Relevant news from the last 24-48 hours
+
+                                    Query: {query}"""}
             ]
             
             payload = {
@@ -153,3 +147,6 @@ class PerplexityService:
         except Exception as e:
             logger.error(f"Error in quick_research: {str(e)}")
             raise Exception(f"Error in quick_research: {str(e)}")
+
+
+
