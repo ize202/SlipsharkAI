@@ -19,11 +19,8 @@ class Citation(BaseModel):
     published_date: Optional[str] = None
 
 class PerplexityResponse(BaseModel):
-    """Structured response from Perplexity API"""
-    content: str  # Main response content, either structured or unstructured
-    key_points: Optional[List[str]] = Field(default_factory=list)  # Key insights if provided in structured format
-    citations: Optional[List[Citation]] = Field(default_factory=list)  # Source citations if available
-    related_questions: Optional[List[str]] = Field(default_factory=list)  # Related questions if available
+    """Response from Perplexity API"""
+    content: str  # Main response content from Perplexity
 
 class PerplexityService:
     """Service for interacting with Perplexity AI API"""
@@ -119,11 +116,9 @@ class PerplexityService:
             # The @observe decorator automatically creates the observation
             # No need to explicitly update it as it's handled by the decorator
 
+
             return PerplexityResponse(
-                content=content,
-                key_points=[],  # We don't get structured format in tier 0
-                citations=[],  # We don't get citations in tier 0
-                related_questions=[]  # We don't get related questions in tier 0
+                content=content
             )
                 
         except Exception as e:
