@@ -22,12 +22,10 @@ class Citation(BaseModel):
 
 class PerplexityResponse(BaseModel):
     """Structured response from Perplexity API"""
-    content: str
-    citations: Optional[List[Citation]] = Field(default=[])
-    related_questions: Optional[List[str]] = Field(default=[])
-    key_points: Optional[List[str]] = Field(default=[])
-    confidence_score: Optional[float] = Field(default=0.5)
-    deep_research_recommended: Optional[bool] = Field(default=False)
+    content: str  # Main response content, either structured or unstructured
+    key_points: Optional[List[str]] = Field(default_factory=list)  # Key insights if provided in structured format
+    citations: Optional[List[Citation]] = Field(default_factory=list)  # Source citations if available
+    related_questions: Optional[List[str]] = Field(default_factory=list)  # Related questions if available
 
 class PerplexityService:
     """Service for interacting with Perplexity AI API"""
@@ -35,7 +33,7 @@ class PerplexityService:
     def __init__(self, timeout: float = 120.0):
         """Initialize the service with API configuration"""
         self.base_url = "https://api.perplexity.ai/chat/completions"
-        self.default_model = "sonar"
+        self.default_model = "sonar"  # Using sonar-pro for deeper research capabilities
         self.api_key = os.getenv("PERPLEXITY_API_KEY")
         if not self.api_key:
             raise ValueError("PERPLEXITY_API_KEY environment variable must be set")
@@ -67,6 +65,7 @@ class PerplexityService:
     ) -> PerplexityResponse:
         """
         Perform quick research using Perplexity AI with web search capabilities.
+        Note: While we request structured output, the free tier may not always provide it.
         
         Args:
             query: The user's query to research
@@ -74,22 +73,30 @@ class PerplexityService:
             search_recency: Time window for search results ('hour', 'day', 'week', 'month')
             
         Returns:
-            PerplexityResponse containing the analysis
+            PerplexityResponse containing the research results. If structured format is not 
+            followed, the entire response will be in the content field with empty key_points.
         """
         try:
-            default_system_prompt = """You are a professional sports betting analyst.
-            Analyze the query and provide key insights based on current information.
-            Focus on recent performance, odds, and any relevant news that could impact betting decisions.
-            Be concise but thorough.
+            default_system_prompt = """You are a professional sports betting analyst providing real-time research.
+            Your task is to search for and analyze the most recent and relevant information about the query.
             
-            Format your response like this:
-            SUMMARY: [Brief summary of findings]
+            Focus on:
+            1. Recent game results and performance trends
+            2. Latest injury updates or roster changes
+            3. Current betting lines and odds movements
+            4. Key matchup factors and statistics
+            5. Relevant news that could impact betting decisions (weather, venue changes, etc.)
+            
+            Keep your analysis factual and data-driven. Include specific numbers, dates, and sources when available.
+            Prioritize information from the last 24-48 hours, but include relevant historical context if important.
+            
+            Try to format your response like this (but provide useful information even if you can't follow this format exactly):
+            SUMMARY: [Concise overview of the most important findings]
             KEY POINTS:
-            - [Point 1]
-            - [Point 2]
-            - [Point 3]
-            CONFIDENCE: [0-1]
-            DEEP RESEARCH NEEDED: [yes/no]"""
+            - [Recent fact/update with specific details]
+            - [Key statistic or trend]
+            - [Important news or development]
+            - [Any other critical information]"""
             
             messages = [
                 {"role": "system", "content": system_prompt or default_system_prompt},
@@ -99,9 +106,6 @@ class PerplexityService:
             payload = {
                 "model": self.default_model,
                 "messages": messages,
-                "temperature": 0.2,
-                "max_tokens": 500,
-                "top_p": 0.9,
                 "search_recency_filter": search_recency
             }
             
@@ -135,33 +139,29 @@ class PerplexityService:
                 }
             )
 
-            # Parse the raw text response
+            # Try to parse structured format, but fall back to raw content if not possible
             sections = content.split('\n')
             summary = ""
             key_points = []
-            confidence = 0.5
-            deep_research_needed = False
+            found_structured = False
 
             for section in sections:
                 if section.startswith('SUMMARY:'):
                     summary = section.replace('SUMMARY:', '').strip()
+                    found_structured = True
                 elif section.startswith('-'):
                     key_points.append(section.replace('-', '').strip())
-                elif section.startswith('CONFIDENCE:'):
-                    try:
-                        confidence = float(section.replace('CONFIDENCE:', '').strip())
-                    except ValueError:
-                        pass
-                elif section.startswith('DEEP RESEARCH NEEDED:'):
-                    deep_research_needed = section.replace('DEEP RESEARCH NEEDED:', '').strip().lower() == 'yes'
+                    found_structured = True
+
+            # If we couldn't find structured format, use the whole content as summary
+            if not found_structured:
+                summary = content
 
             return PerplexityResponse(
                 content=summary,
+                key_points=key_points if found_structured else [],
                 citations=[],  # We don't get citations in tier 0
-                related_questions=[],  # We don't get related questions in tier 0
-                key_points=key_points,
-                confidence_score=confidence,
-                deep_research_recommended=deep_research_needed
+                related_questions=[]  # We don't get related questions in tier 0
             )
                 
         except Exception as e:
