@@ -34,6 +34,9 @@ def json_serialize(obj):
 def parse_datetime(obj):
     """Parse datetime strings in a dictionary"""
     if isinstance(obj, dict):
+        # Skip datetime parsing for game_date field
+        if "game_date" in obj:
+            return {k: parse_datetime(v) if k != "game_date" else v for k, v in obj.items()}
         return {k: parse_datetime(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [parse_datetime(item) for item in obj]
@@ -118,8 +121,13 @@ def validate_json_response(response: str) -> Dict[str, Any]:
     try:
         # First parse the JSON normally
         parsed = json.loads(response)
+        logger.debug(f"Initial JSON parse result: {parsed}")
+        
         # Then try to convert any ISO datetime strings to datetime objects
-        return parse_datetime(parsed)
+        parsed_with_dates = parse_datetime(parsed)
+        logger.debug(f"After datetime parsing: {parsed_with_dates}")
+        
+        return parsed_with_dates
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON response: {str(e)}")
         logger.error(f"Raw response: {response}")
