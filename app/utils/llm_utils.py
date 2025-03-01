@@ -8,9 +8,11 @@ from datetime import datetime
 import logging
 import re
 from langfuse.decorators import observe
+from langfuse import Langfuse
 import openai
 from openai import AsyncOpenAI
 from app.config import get_logger
+from app.config.langfuse_init import langfuse
 
 logger = get_logger(__name__)
 
@@ -44,7 +46,7 @@ def parse_datetime(obj):
             return obj
     return obj
 
-@observe(name="structured_llm_call")
+@observe(name="structured_llm_call", as_type="generation")
 async def structured_llm_call(
     prompt: str,
     messages: List[Dict[str, str]],
@@ -80,6 +82,23 @@ async def structured_llm_call(
             messages=full_messages,
             temperature=temperature,
             max_tokens=max_tokens
+        )
+        
+        # Extract usage information for Langfuse
+        usage = completion.usage
+        langfuse.update_current_observation(
+            input=full_messages,  # Include full messages for context
+            model=model,  # Model name for cost inference
+            metadata={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "should_validate_json": should_validate_json
+            },
+            usage_details={
+                "input": usage.prompt_tokens,
+                "output": usage.completion_tokens,
+                "total": usage.total_tokens
+            }
         )
         
         # Extract the response content
