@@ -118,28 +118,10 @@ class PerplexityService:
             usage = data.get("usage", {})
             # The @observe decorator automatically creates the observation
             # No need to explicitly update it as it's handled by the decorator
-            
-            # Try to parse structured format, but fall back to raw content if not possible
-            sections = content.split('\n')
-            summary = ""
-            key_points = []
-            found_structured = False
-
-            for section in sections:
-                if section.startswith('SUMMARY:'):
-                    summary = section.replace('SUMMARY:', '').strip()
-                    found_structured = True
-                elif section.startswith('-'):
-                    key_points.append(section.replace('-', '').strip())
-                    found_structured = True
-
-            # If we couldn't find structured format, use the whole content as summary
-            if not found_structured:
-                summary = content
 
             return PerplexityResponse(
-                content=summary,
-                key_points=key_points if found_structured else [],
+                content=content,
+                key_points=[],  # We don't get structured format in tier 0
                 citations=[],  # We don't get citations in tier 0
                 related_questions=[]  # We don't get related questions in tier 0
             )
