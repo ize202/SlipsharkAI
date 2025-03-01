@@ -128,8 +128,6 @@ class PerplexityService:
                 input=messages,
                 model=self.default_model,
                 metadata={
-                    "temperature": 0.2,
-                    "max_tokens": 500,
                     "search_recency": search_recency
                 },
                 usage_details={
