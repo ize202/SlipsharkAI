@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
 from langfuse.decorators import observe
-from .supabase_models import BetHistory, UserStats, UserPreferences
+from ..models.supabase_models import BetHistory, UserStats, UserPreferences
 from ..utils.cache import redis_cache, memory_cache
 
 # Set up logging

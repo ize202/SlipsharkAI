@@ -2,6 +2,9 @@ from datetime import datetime
 import asyncio
 from typing import List, Dict, Any, Optional
 from app.services.api_sports_basketball import NBAService, NBAApiConfig
+from app.services.date_resolution_service import DateResolutionService
+from app.services.basketball_date_handler import BasketballDateHandler
+from app.models.research_models import ClientMetadata
 from app.config import get_logger
 from langfuse.decorators import observe
 
@@ -9,14 +12,16 @@ logger = get_logger(__name__)
 
 class BasketballService:
     """
-    Simple service for basketball data that wraps the NBA API.
-    Provides methods to get team, player, and game data.
+    Service for basketball data that wraps the NBA API.
+    Provides methods to get team, player, and game data with proper date handling.
     """
 
     def __init__(self):
-        """Initialize the NBA API config"""
+        """Initialize the NBA API config and date handlers"""
         self.nba_config = NBAApiConfig.from_env()
         self._nba_service = None
+        self.date_service = DateResolutionService()
+        self.date_handler = BasketballDateHandler()
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -40,33 +45,39 @@ class BasketballService:
             await self._nba_service.__aexit__(None, None, None)
             self._nba_service = None
 
-    def determine_season(self, game_date: Optional[str] = None) -> str:
+    def _resolve_game_date(
+        self,
+        date_reference: Optional[str],
+        client_metadata: ClientMetadata
+    ) -> Optional[datetime]:
         """
-        Determine the NBA season to use based on date or current date.
+        Resolve game date from reference and validate it
         
-        NBA seasons span two calendar years (e.g., 2023-2024 season is referred to as "2023").
-        The season typically starts in October and ends in June of the following year.
+        Args:
+            date_reference: Date reference (could be relative like "tomorrow")
+            client_metadata: Client metadata for timezone context
+            
+        Returns:
+            Resolved datetime or None if invalid/not provided
         """
-        # Check if a specific date was provided
-        if game_date:
-            try:
-                # Extract year from date
-                date_obj = datetime.strptime(game_date, "%Y-%m-%d")
-                # If date is between July and December, use that year
-                # If date is between January and June, use previous year
-                year = date_obj.year if date_obj.month > 6 else date_obj.year - 1
-                return str(year)
-            except (ValueError, TypeError):
-                # If date parsing fails, fall back to current season
-                pass
-        
-        # Default: determine current season based on today's date
-        current_date = datetime.now()
-        # If current month is between July and December, use current year
-        # If current month is between January and June, use previous year
-        current_season = current_date.year if current_date.month > 6 else current_date.year - 1
-        
-        return str(current_season)
+        if not date_reference:
+            return None
+            
+        # Try to resolve relative date
+        if self.date_service.is_relative_date(date_reference):
+            resolved_date = self.date_service.resolve_relative_date(
+                date_reference,
+                client_metadata
+            )
+        else:
+            # Try to parse as exact date
+            resolved_date = self.date_service.parse_api_date(date_reference)
+            
+        # Validate the resolved date
+        if resolved_date and self.date_handler.validate_game_date(resolved_date):
+            return resolved_date
+            
+        return None
 
     @observe(name="find_team")
     async def find_team(self, team_name: str, season: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -77,7 +88,7 @@ class BasketballService:
         nba = await self._ensure_nba_service()
         
         # Use provided season or determine current season
-        season_to_use = season or self.determine_season()
+        season_to_use = season or self.date_handler.determine_season(datetime.now())
         
         try:
             # Get teams data
@@ -101,15 +112,29 @@ class BasketballService:
             return None
 
     @observe(name="get_team_data")
-    async def get_team_data(self, team_name: str, season: Optional[str] = None) -> Dict[str, Any]:
+    async def get_team_data(
+        self,
+        team_name: str,
+        date_reference: Optional[str] = None,
+        client_metadata: Optional[ClientMetadata] = None
+    ) -> Dict[str, Any]:
         """Get comprehensive data for a team"""
         nba = await self._ensure_nba_service()
         
-        # Use provided season or determine current season
-        season_to_use = season or self.determine_season()
+        # Resolve and validate the game date
+        game_date = None
+        if date_reference and client_metadata:
+            game_date = self._resolve_game_date(date_reference, client_metadata)
+            if date_reference and not game_date:
+                logger.warning(f"Invalid game date reference: {date_reference}")
+        
+        # Determine season based on the game date or current date
+        season = self.date_handler.determine_season(
+            game_date or datetime.now()
+        )
         
         # Find the team
-        team_info = await self.find_team(team_name, season_to_use)
+        team_info = await self.find_team(team_name, season)
         if not team_info:
             return {"error": f"Team not found: {team_name}"}
             
@@ -119,22 +144,35 @@ class BasketballService:
             # Gather comprehensive team data in parallel
             team_tasks = [
                 # Team stats
-                nba.teams.get_team_statistics(team_id, season=season_to_use),
+                nba.teams.get_team_statistics(team_id, season=season),
                 # Standings
-                nba.standings.get_standings("standard", season_to_use, team_id),
-                # Recent and upcoming games
-                nba.games.list_games(season=season_to_use, team_id=team_id)
+                nba.standings.get_standings("standard", season, team_id),
+                # Games - filter by date if provided
+                nba.games.list_games(
+                    season=season,
+                    team_id=team_id,
+                    date=self.date_service.format_date_for_api(game_date) if game_date else None
+                )
             ]
             
             # Execute team tasks
             team_results = await asyncio.gather(*team_tasks, return_exceptions=True)
+            
+            # Add season phase if we have a game date
+            season_context = {}
+            if game_date:
+                season_context = {
+                    "phase": self.date_handler.get_season_phase(game_date),
+                    "is_playoff_period": self.date_handler.is_playoff_period(game_date)
+                }
             
             # Process team results
             return {
                 "team_info": team_info,
                 "statistics": team_results[0].model_dump() if not isinstance(team_results[0], Exception) else {"error": str(team_results[0])},
                 "standings": [s.model_dump() for s in team_results[1]] if not isinstance(team_results[1], Exception) else {"error": str(team_results[1])},
-                "games": [g.model_dump() for g in team_results[2]] if not isinstance(team_results[2], Exception) else {"error": str(team_results[2])}
+                "games": [g.model_dump() for g in team_results[2]] if not isinstance(team_results[2], Exception) else {"error": str(team_results[2])},
+                "season_context": season_context
             }
             
         except Exception as e:
@@ -142,18 +180,33 @@ class BasketballService:
             return {"error": f"Failed to get data for team {team_name}: {str(e)}"}
 
     @observe(name="get_player_data")
-    async def get_player_data(self, player_name: str, season: Optional[str] = None, team_name: Optional[str] = None) -> Dict[str, Any]:
+    async def get_player_data(
+        self,
+        player_name: str,
+        team_name: Optional[str] = None,
+        date_reference: Optional[str] = None,
+        client_metadata: Optional[ClientMetadata] = None
+    ) -> Dict[str, Any]:
         """Get data for a player"""
         nba = await self._ensure_nba_service()
         
-        # Use provided season or determine current season
-        season_to_use = season or self.determine_season()
+        # Resolve and validate the game date
+        game_date = None
+        if date_reference and client_metadata:
+            game_date = self._resolve_game_date(date_reference, client_metadata)
+            if date_reference and not game_date:
+                logger.warning(f"Invalid game date reference: {date_reference}")
+        
+        # Determine season based on the game date or current date
+        season = self.date_handler.determine_season(
+            game_date or datetime.now()
+        )
         
         try:
             # If team name is provided, try to find the team first
             team_id = None
             if team_name:
-                team_info = await self.find_team(team_name, season_to_use)
+                team_info = await self.find_team(team_name, season)
                 if team_info:
                     team_id = team_info["id"]
             
@@ -162,14 +215,14 @@ class BasketballService:
             
             # Try searching by first name first (which is usually more unique for NBA players)
             players = await nba.players.get_players(
-                season=season_to_use,
+                season=season,
                 search=name_parts[0]  # Use first name for search
             )
             
             # If no results or multiple results, try full name search
             if not players or (len(players) > 1 and len(name_parts) > 1):
                 players = await nba.players.get_players(
-                    season=season_to_use,
+                    season=season,
                     search=player_name  # Try full name
                 )
             
@@ -196,7 +249,7 @@ class BasketballService:
                 if team_id:
                     player_stats = await nba.players.get_player_statistics(
                         player_id=player.id,
-                        season=season_to_use,
+                        season=season,
                         team_id=team_id
                     )
                 else:
@@ -223,7 +276,7 @@ class BasketballService:
         nba = await self._ensure_nba_service()
         
         # Use provided season or determine current season
-        season_to_use = season or self.determine_season()
+        season_to_use = season or self.date_handler.determine_season(datetime.now())
         
         try:
             # Find both teams
@@ -303,7 +356,7 @@ class BasketballService:
         nba = await self._ensure_nba_service()
         
         # Use provided season or determine current season
-        season_to_use = season or self.determine_season()
+        season_to_use = season or self.date_handler.determine_season(datetime.now())
         
         try:
             # Get standings and recent games
