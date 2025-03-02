@@ -10,11 +10,13 @@ from app.models.research_models import (
     DataPoint,
     ResearchMode,
     SportType,
-    ConversationContext
+    ConversationContext,
+    ClientMetadata
 )
 from app.services.perplexity import PerplexityService
 from app.services.basketball_service import BasketballService
 from app.services.supabase import SupabaseService
+from app.services.client_metadata_service import ClientMetadataService
 from app.utils.llm_utils import structured_llm_call, json_serialize
 from app.utils.prompt_manager import get_query_analysis_prompt, get_response_generation_prompt
 from app.config import get_logger
@@ -39,6 +41,7 @@ class ResearchChain:
         self.perplexity = PerplexityService()
         self.basketball = None  # Lazy initialization
         self.supabase = SupabaseService()
+        self.client_metadata_service = ClientMetadataService()
 
     async def _ensure_basketball_service(self):
         """Ensure basketball service is initialized in async context"""
@@ -49,13 +52,22 @@ class ResearchChain:
 
     @observe(name="analyze_query")
     async def _analyze_query(self, request: ResearchRequest) -> QueryAnalysis:
-        """[LLM Call 1] Analyze the user's query and determine research mode"""
+        """[LLM Call 1] Analyze the user's query"""
         try:
             # Get the current production prompt from Langfuse
             prompt = get_query_analysis_prompt()
             
-            # Compile the prompt with variables
-            compiled_prompt = prompt.compile(query=request.query)
+            # Add client metadata to the context
+            client_time = self.client_metadata_service.get_current_time_for_client(
+                request.client_metadata
+            )
+            
+            # Compile the prompt with variables including client time context
+            compiled_prompt = prompt.compile(
+                query=request.query,
+                client_time=client_time.isoformat(),
+                client_timezone=request.client_metadata.timezone
+            )
             
             analysis_result = await structured_llm_call(
                 prompt=compiled_prompt,
@@ -82,25 +94,39 @@ class ResearchChain:
         """Gather data based on determined research mode"""
         data_points: List[DataPoint] = []
         
-        # Always start with web search
         try:
-            # Let PerplexityService handle all the search details
-            perplexity_response = await self.perplexity.quick_research(query=analysis.raw_query)
+            # Let PerplexityService handle the web search - no need for client metadata here
+            perplexity_response = await self.perplexity.quick_research(
+                query=analysis.raw_query
+            )
+            
             data_points.append(DataPoint(
                 source="perplexity",
                 content=perplexity_response.content,
                 confidence=0.8
             ))
             
-            # For deep research, add sports API data
+            # For deep research, add sports API data with proper time context
             if analysis.recommended_mode == ResearchMode.DEEP:
                 basketball = await self._ensure_basketball_service()
+                
+                # Convert relative dates (today/tonight) to actual dates in client's timezone
+                if analysis.game_date and analysis.game_date.lower() in ["today", "tonight"]:
+                    client_time = self.client_metadata_service.get_current_time_for_client(
+                        request.client_metadata
+                    )
+                    analysis.game_date = client_time.strftime("%Y-%m-%d")
                 
                 # Get team data if teams are mentioned
                 team_data = {}
                 for team_key, team in analysis.teams.items():
                     if team:
-                        team_data[team] = await basketball.get_team_data(team)
+                        # Pass client metadata for proper time context in sports API calls
+                        team_data[team] = await basketball.get_team_data(
+                            team,
+                            game_date=analysis.game_date,  # Pass the converted date
+                            client_metadata=request.client_metadata
+                        )
                         if team_data[team]:
                             data_points.append(DataPoint(
                                 source="basketball_api",
@@ -119,7 +145,13 @@ class ResearchChain:
                     
                     if player_team:
                         try:
-                            player_data = await basketball.get_player_data(player, player_team)
+                            # Pass client metadata for proper time context in sports API calls
+                            player_data = await basketball.get_player_data(
+                                player,
+                                player_team,
+                                game_date=analysis.game_date,  # Pass the converted date
+                                client_metadata=request.client_metadata
+                            )
                             if player_data:
                                 data_points.append(DataPoint(
                                     source="basketball_api",

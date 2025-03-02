@@ -2,6 +2,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+import pytz
 
 class SportType(str, Enum):
     BASKETBALL = "basketball"
@@ -75,6 +76,32 @@ class DataPoint(BaseModel):
             datetime: lambda v: v.isoformat()
         }
 
+class ClientMetadata(BaseModel):
+    """Metadata about the client making the request"""
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="When the request was made"
+    )
+    timezone: str = Field(
+        default="UTC",
+        description="Client's timezone (e.g. 'America/New_York')"
+    )
+    locale: str = Field(
+        default="en-US",
+        description="Client's locale"
+    )
+
+    @property
+    def localized_timestamp(self) -> datetime:
+        """Get the timestamp in the client's timezone"""
+        tz = pytz.timezone(self.timezone)
+        return self.timestamp.astimezone(tz)
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
 class ResearchRequest(BaseModel):
     """Research request with context"""
     query: str = Field(description="The user's sports betting query")
@@ -83,6 +110,10 @@ class ResearchRequest(BaseModel):
     conversation_history: Optional[List[Message]] = Field(
         default_factory=list,
         max_items=5
+    )
+    client_metadata: ClientMetadata = Field(
+        default_factory=ClientMetadata,
+        description="Metadata about the client making the request"
     )
 
 class ResearchResponse(BaseModel):
