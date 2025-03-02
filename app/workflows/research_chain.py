@@ -22,6 +22,7 @@ from app.utils.prompt_manager import get_query_analysis_prompt, get_response_gen
 from app.config import get_logger
 from langfuse.decorators import observe
 from app.utils.cache import redis_cache
+from app.services.date_resolution_service import DateResolutionService
 
 logger = get_logger(__name__)
 
@@ -42,6 +43,7 @@ class ResearchChain:
         self.basketball = None  # Lazy initialization
         self.supabase = SupabaseService()
         self.client_metadata_service = ClientMetadataService()
+        self.date_resolution_service = DateResolutionService()
 
     async def _ensure_basketball_service(self):
         """Ensure basketball service is initialized in async context"""
@@ -69,10 +71,21 @@ class ResearchChain:
                 client_timezone=request.client_metadata.timezone
             )
             
+            # Pre-process any date references in the query
             analysis_result = await structured_llm_call(
                 prompt=compiled_prompt,
                 messages=[{"role": "user", "content": request.query}]
             )
+            
+            # Resolve any relative dates in the analysis result
+            if analysis_result.get("game_date"):
+                if self.date_resolution_service.is_relative_date(analysis_result["game_date"]):
+                    resolved_date = self.date_resolution_service.resolve_relative_date(
+                        analysis_result["game_date"],
+                        request.client_metadata
+                    )
+                    if resolved_date:
+                        analysis_result["game_date"] = self.date_resolution_service.format_date_for_api(resolved_date)
             
             # Mode Decision Logic
             if request.mode != ResearchMode.AUTO:
@@ -110,13 +123,6 @@ class ResearchChain:
             if analysis.recommended_mode == ResearchMode.DEEP:
                 basketball = await self._ensure_basketball_service()
                 
-                # Convert relative dates (today/tonight) to actual dates in client's timezone
-                if analysis.game_date and analysis.game_date.lower() in ["today", "tonight"]:
-                    client_time = self.client_metadata_service.get_current_time_for_client(
-                        request.client_metadata
-                    )
-                    analysis.game_date = client_time.strftime("%Y-%m-%d")
-                
                 # Get team data if teams are mentioned
                 team_data = {}
                 for team_key, team in analysis.teams.items():
@@ -124,7 +130,7 @@ class ResearchChain:
                         # Pass client metadata for proper time context in sports API calls
                         team_data[team] = await basketball.get_team_data(
                             team,
-                            game_date=analysis.game_date,  # Pass the converted date
+                            date_reference=analysis.game_date,  # Use date_reference instead of game_date
                             client_metadata=request.client_metadata
                         )
                         if team_data[team]:
@@ -149,7 +155,7 @@ class ResearchChain:
                             player_data = await basketball.get_player_data(
                                 player,
                                 player_team,
-                                game_date=analysis.game_date,  # Pass the converted date
+                                date_reference=analysis.game_date,  # Use date_reference here too
                                 client_metadata=request.client_metadata
                             )
                             if player_data:
