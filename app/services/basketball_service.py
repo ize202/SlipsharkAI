@@ -32,6 +32,7 @@ class BasketballService:
         self.leagues = NBALeagueService(self.client)
         
         self._team_cache = {}  # Cache team IDs
+        self._nba_service = None
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -41,6 +42,13 @@ class BasketballService:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         await self.client.__aexit__(exc_type, exc_val, exc_tb)
+
+    async def _ensure_nba_service(self) -> NBAService:
+        """Ensure NBA service is initialized"""
+        if not self._nba_service:
+            self._nba_service = NBAService(self.nba_config)
+            await self._nba_service.__aenter__()
+        return self._nba_service
 
     def _resolve_game_date(
         self,
@@ -192,75 +200,115 @@ class BasketballService:
             return {}
 
     @observe(name="get_player_data")
-    async def get_player_data(self, player_name: str, team_name: Optional[str] = None, game_date: Optional[str] = None, client_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def get_player_data(
+        self,
+        player_name: str,
+        team_name: Optional[str] = None,
+        game_date: Optional[str] = None,
+        client_metadata: Optional[ClientMetadata] = None,
+        season: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Get data for a specific player"""
-        current_season = self.date_handler.determine_season(datetime.now())
+        nba = await self._ensure_nba_service()
+        current_season = season or self.date_handler.determine_season(datetime.now())
+        
+        logger.info(f"Getting player data for {player_name}, team: {team_name}, season: {current_season}")
         
         try:
-            # Get teams first
-            teams = await self.teams.list_teams()
+            # Always try to find team first
             team_id = None
-            
             if team_name:
-                # Find the team by name
-                team = next((t for t in teams if t.name.lower() == team_name.lower()), None)
-                if team:
-                    team_id = team.id
+                team_info = await self.find_team(team_name, current_season)
+                logger.debug(f"Team lookup result for {team_name}: {team_info}")
+                if team_info:
+                    team_id = team_info["id"]
+                    logger.info(f"Found team ID {team_id} for {team_name}")
+                else:
+                    logger.error(f"Could not find team ID for team name: {team_name}")
+                    return {"error": f"Could not find team: {team_name}"}
             
-            # Get players for the team
-            players = await self.players.get_players(
-                season=str(current_season),
-                team_id=team_id,
-                search=player_name
-            )
+            # Split player name into first and last name
+            name_parts = player_name.strip().split(" ", 1)
+            if len(name_parts) != 2:
+                logger.error(f"Invalid player name format: {player_name}")
+                return {"error": f"Invalid player name format. Expected 'First Last', got: {player_name}"}
+            
+            first_name, last_name = name_parts
+            
+            # Search for player with team filter if available
+            search_params = {
+                "name": f"{last_name}",  # Search by last name for better results
+                "season": str(current_season)
+            }
+            
+            if team_id:
+                search_params["team"] = team_id
+            
+            logger.debug(f"Searching for player with params: {search_params}")
+            players = await nba.players.get_players(**search_params)
             
             if not players:
-                return {"error": f"No players found for team {team_name}"}
-                
-            # Find exact match if possible
-            player = next((p for p in players if f"{p.firstname} {p.lastname}".lower() == player_name.lower()), None)
-                
-            if not player and players:
-                # Try partial match
-                player = next((p for p in players if player_name.lower() in f"{p.firstname} {p.lastname}".lower()), None)
-                
-            if not player:
-                return {"error": f"Player not found: {player_name}"}
+                logger.warning(f"No players found matching {player_name}")
+                return {"error": f"No players found matching {player_name}"}
             
-            # Get player statistics if available
+            # Find exact match or closest match
+            player = None
+            for p in players:
+                if (p.firstname.lower() == first_name.lower() and 
+                    p.lastname.lower() == last_name.lower()):
+                    player = p
+                    logger.info(f"Found exact match for player {player_name}")
+                    break
+            
+            if not player:
+                # Take first result if no exact match
+                player = players[0]
+                logger.info(f"No exact match found, using first result for {player_name}")
+            
             try:
-                stats = await self.players.get_player_statistics(
+                # Get player's current team if not provided
+                if not team_id and player.leagues and player.leagues.standard:
+                    logger.debug(f"Attempting to find team ID from player leagues data")
+                    # Try to get team from player's current league info
+                    if hasattr(player.leagues.standard, "team") and player.leagues.standard.team:
+                        team_id = player.leagues.standard.team.get("id")
+                        logger.info(f"Found team ID {team_id} from player leagues data")
+                
+                if not team_id:
+                    logger.error(f"Could not find team ID for player {player_name}")
+                    return {"error": f"Could not find team for player {player_name}"}
+                
+                logger.info(f"Getting player statistics with team_id={team_id}, player_id={player.id}, season={current_season}")
+                # Get player statistics with both player_id and team_id
+                stats = await nba.players.get_player_statistics(
+                    team=int(team_id),  # Team ID must be first
                     player_id=player.id,
                     season=str(current_season)
                 )
                 
                 # Get recent games if date provided
                 games = []
-                if game_date:
+                if game_date and client_metadata:
                     resolved_date = self._resolve_game_date(game_date, client_metadata)
                     if resolved_date:
-                        games = await self.games.list_games(
+                        games = await nba.games.list_games(
                             season=str(current_season),
-                            player_id=player.id,
+                            team_id=team_id,
                             date=self.date_service.format_date_for_api(resolved_date)
                         )
                 
                 return {
                     "player": player.model_dump(),
-                    "statistics": stats[0].model_dump() if stats else {},
-                    "recent_games": [g.model_dump() for g in games] if games else [],
-                    "season": current_season
+                    "statistics": [s.model_dump() for s in stats] if stats else [],
+                    "games": [g.model_dump() for g in games] if games else []
                 }
                 
             except Exception as e:
-                logger.error(f"Error getting player statistics: {str(e)}")
-                return {
-                    "player": player.model_dump(),
-                    "error": f"Failed to get player statistics: {str(e)}"
-                }
+                logger.error(f"Error getting statistics for player {player_name}: {str(e)}", exc_info=True)
+                return {"error": f"Failed to get player statistics: {str(e)}"}
                 
         except Exception as e:
-            logger.error(f"Error getting player data: {str(e)}")
+            logger.error(f"Error getting player data: {str(e)}", exc_info=True)
             return {"error": f"Failed to get player data: {str(e)}"}
 
     @observe(name="get_matchup_data")
@@ -405,41 +453,61 @@ class BasketballService:
             return {"error": f"Failed to get game statistics: {str(e)}"}
 
     @observe(name="get_games")
-    async def get_games(self, date_reference: str = "today", client_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """Get games for a specific date reference"""
+    async def get_games(
+        self, 
+        date_reference: str = "recent", 
+        team_name: Optional[str] = None,
+        client_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get games for a specific date reference and optionally filter by team
+        
+        Args:
+            date_reference: Currently only supports "recent" to get games from yesterday, today, and tomorrow
+            team_name: Optional team name to filter games for
+            client_metadata: Optional client metadata
+            
+        Returns:
+            List of games matching the criteria
+        """
         all_games = []
+        team_id = None
         
         try:
-            if date_reference == "recent":
-                # Get games for yesterday, today, and tomorrow
-                today = datetime.now()
-                dates = [
-                    (today - timedelta(days=1)).strftime("%Y-%m-%d"),
-                    today.strftime("%Y-%m-%d"),
-                    (today + timedelta(days=1)).strftime("%Y-%m-%d")
-                ]
-                
-                for date in dates:
-                    season = self.date_handler.determine_season(datetime.strptime(date, "%Y-%m-%d"))
-                    games = await self.games.list_games(date=date, season=str(season))
+            # If team name provided, get team ID first
+            if isinstance(team_name, str):  # Only process if it's actually a team name string
+                team_info = await self.find_team(team_name)
+                if not team_info:
+                    logger.warning(f"Team not found: {team_name}")
+                    return []
+                team_id = team_info["id"]
+            
+            # Get games for yesterday, today, and tomorrow
+            today = datetime.now(timezone.utc)
+            dates = [
+                (today - timedelta(days=1)).strftime("%Y-%m-%d"),
+                today.strftime("%Y-%m-%d"),
+                (today + timedelta(days=1)).strftime("%Y-%m-%d")
+            ]
+            
+            # Get current season
+            current_season = self.date_handler.determine_season(today)
+            
+            # Get games for each date
+            for date in dates:
+                try:
+                    games = await self.games.list_games(
+                        date=date, 
+                        season=str(current_season),
+                        team_id=team_id
+                    )
                     if games:
                         all_games.extend([g.model_dump() for g in games])
-                        
-                return all_games
-            else:
-                # Handle single date reference
-                resolved_date = self._resolve_game_date(date_reference, client_metadata)
-                if not resolved_date:
-                    logger.warning(f"Invalid date reference: {date_reference}")
-                    return []
-                    
-                season = self.date_handler.determine_season(resolved_date)
-                games = await self.games.list_games(
-                    date=self.date_service.format_date_for_api(resolved_date),
-                    season=str(season)
-                )
-                
-                return [g.model_dump() for g in games] if games else []
+                except Exception as e:
+                    logger.error(f"Error getting games for date {date}: {str(e)}")
+                    continue
+            
+            return all_games
                 
         except Exception as e:
             logger.error(f"Error getting games for {date_reference}: {str(e)}")

@@ -251,11 +251,22 @@ async def test_get_player_data():
     
     async with BasketballService() as service:
         # Test getting LeBron James data
-        player_data = await service.get_player_data("LeBron James", metadata)
+        player_data = await service.get_player_data(
+            player_name="LeBron James",
+            team_name="Los Angeles Lakers",
+            client_metadata=metadata
+        )
         log_api_response(player_data, "LeBron James Player Data")
 
         assert player_data is not None
-        assert "id" in player_data
+        assert "error" not in player_data
+        assert "player" in player_data
+        assert "statistics" in player_data
+        assert isinstance(player_data["statistics"], list)
+        
+        # Verify player info
+        assert player_data["player"]["firstname"] == "LeBron"
+        assert player_data["player"]["lastname"] == "James"
 
 @pytest.mark.asyncio
 async def test_get_game_data():
@@ -457,8 +468,15 @@ async def test_player_statistics():
 
                 log_api_response(player_data, f"{player_name} Stats")
                 assert player_data is not None
-                assert "id" in player_data
+                assert "error" not in player_data
+                assert "player" in player_data
                 assert "statistics" in player_data
+                assert isinstance(player_data["statistics"], list)
+
+                # Verify player info
+                player_info = player_data["player"]
+                assert player_info["firstname"] in player_name
+                assert player_info["lastname"] in player_name
 
             except Exception as e:
                 logger.error(f"Error testing player statistics for {player_name}: {str(e)}")

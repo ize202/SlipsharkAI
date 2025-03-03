@@ -543,7 +543,7 @@ class NBAPlayerService:
     async def get_players(
         self,
         season: Optional[str] = None,
-        team_id: Optional[int] = None,
+        team: Optional[int] = None,
         name: Optional[str] = None,
         country: Optional[str] = None,
         search: Optional[str] = None
@@ -552,8 +552,8 @@ class NBAPlayerService:
         params = {}
         if season:
             params["season"] = season
-        if team_id:
-            params["team"] = team_id
+        if team:
+            params["team"] = team
         if name:
             params["name"] = name
         if country:
@@ -569,28 +569,28 @@ class NBAPlayerService:
         self,
         player_id: Optional[int] = None,
         game_id: Optional[int] = None,
-        team_id: Optional[int] = None,
+        team: Optional[int] = None,
         season: Optional[str] = None
     ) -> List[PlayerStatistics]:
         """Get player statistics with optional filters"""
         # API requires at least one parameter
-        if not any([player_id, game_id, team_id, season]):
-            raise ValueError("At least one parameter (player_id, game_id, team_id, or season) is required")
+        if not any([player_id, game_id, team, season]):
+            raise ValueError("At least one parameter (player_id, game_id, team, or season) is required")
             
         params = {}
         if player_id:
-            params["id"] = player_id
+            params["id"] = player_id  # API expects 'id' not 'player_id'
         if game_id:
             params["game"] = game_id
-        if team_id:
-            params["team"] = team_id
+        if team:
+            params["team"] = team
         if season:
             params["season"] = season
             
         try:
             data = await self.client._make_request("players/statistics", params)
             if not data.get("response"):
-                logger.warning(f"No statistics found for player (id={player_id}, game={game_id}, team={team_id}, season={season})")
+                logger.warning(f"No statistics found for player (id={player_id}, game={game_id}, team={team}, season={season})")
                 return []
                 
             return [PlayerStatistics(**stats) for stats in data.get("response", [])]
