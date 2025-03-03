@@ -2,7 +2,7 @@
 NBA-specific date handling logic.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 from dataclasses import dataclass
 from app.config import get_logger
@@ -49,7 +49,8 @@ class BasketballDateHandler:
         Returns:
             True if date is valid for NBA queries
         """
-        current_date = datetime.now()
+        # Get current date in UTC
+        current_date = datetime.now(timezone.utc)
         
         # Allow queries up to next season
         max_future_date = current_date.replace(
@@ -62,6 +63,10 @@ class BasketballDateHandler:
         min_past_date = current_date.replace(
             year=current_date.year - 1
         )
+        
+        # Convert input date to UTC if it has a timezone
+        if date.tzinfo:
+            date = date.astimezone(timezone.utc)
         
         return min_past_date <= date <= max_future_date
     
