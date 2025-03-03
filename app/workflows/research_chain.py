@@ -129,9 +129,9 @@ class ResearchChain:
                     if team:
                         # Pass client metadata for proper time context in sports API calls
                         team_data[team] = await basketball.get_team_data(
-                            team,
-                            date_reference=analysis.game_date,  # Use date_reference instead of game_date
-                            client_metadata=request.client_metadata
+                            team_name=team,
+                            client_metadata=request.client_metadata,
+                            game_date=analysis.game_date
                         )
                         if team_data[team]:
                             data_points.append(DataPoint(
@@ -141,34 +141,23 @@ class ResearchChain:
                             ))
                 
                 # Get player data if players are mentioned
+                player_data = {}
                 for player in analysis.players:
-                    # Try to find the player's team from context or analysis
-                    player_team = None
-                    if request.context and request.context.teams:
-                        player_team = request.context.teams[0]
-                    elif team_data:
-                        player_team = list(team_data.keys())[0]
-                    
-                    if player_team:
-                        try:
-                            # Pass client metadata for proper time context in sports API calls
-                            player_data = await basketball.get_player_data(
-                                player,
-                                player_team,
-                                date_reference=analysis.game_date,  # Use date_reference here too
-                                client_metadata=request.client_metadata
-                            )
-                            if player_data:
-                                data_points.append(DataPoint(
-                                    source="basketball_api",
-                                    content=player_data,
-                                    confidence=0.9
-                                ))
-                        except Exception as e:
-                            logger.error(f"Error getting data for player {player}: {str(e)}")
+                    if player:
+                        # Get team for this player if available
+                        team = next((team for team_key, team in analysis.teams.items() if team), None)
+                        
+                        # Pass client metadata for proper time context in sports API calls
+                        player_data[player] = await basketball.get_player_data(
+                            player_name=player,
+                            client_metadata=request.client_metadata,
+                            team_name=team,
+                            game_date=analysis.game_date
+                        )
+                        if player_data[player]:
                             data_points.append(DataPoint(
                                 source="basketball_api",
-                                content={"error": f"Failed to get data for player {player}: {str(e)}"},
+                                content=player_data[player],
                                 confidence=0.9
                             ))
             

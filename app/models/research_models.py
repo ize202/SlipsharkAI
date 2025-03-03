@@ -71,10 +71,20 @@ class DataPoint(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Custom serialization method"""
+        return {
+            "source": self.source,
+            "content": self.content,
+            "timestamp": self.timestamp.isoformat(),
+            "confidence": self.confidence
+        }
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+        arbitrary_types_allowed = True
 
 class ClientMetadata(BaseModel):
     """Metadata about the client making the request"""

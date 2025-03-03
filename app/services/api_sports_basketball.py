@@ -1,6 +1,6 @@
 """
-NBA API Service using RapidAPI
-This module provides a clean interface to the NBA API endpoints from RapidAPI.
+NBA API Service using API Sports
+This module provides a clean interface to the NBA API endpoints from API Sports.
 """
 
 from typing import Optional, Dict, Any, List, TypeVar, Generic
@@ -363,6 +363,65 @@ class NBAApiClient:
                     continue
                 raise NBAApiError(f"Request failed after {max_retries} retries: {str(e)}")
 
+    @redis_cache(ttl=3600)  # 1 hour cache
+    async def get_standings(
+        self,
+        league: str = "standard",
+        season: str = "2023",
+        team_id: Optional[int] = None,
+        conference: Optional[str] = None,
+        division: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get standings with optional filters
+        
+        Args:
+            league: League name (default: "standard")
+            season: Season year (default: "2023")
+            team_id: Optional team ID to filter by
+            conference: Optional conference to filter by
+            division: Optional division to filter by
+            
+        Returns:
+            Dictionary containing standings data
+        """
+        params = {
+            "league": league,
+            "season": season
+        }
+        if team_id:
+            params["team"] = team_id
+        if conference:
+            params["conference"] = conference.lower()
+        if division:
+            params["division"] = division.lower()
+            
+        return await self._make_request("standings", params)
+
+    @redis_cache(ttl=3600)
+    async def list_games(self, season: str = None, team_id: int = None, date: str = None) -> List[Dict]:
+        """
+        List NBA games based on provided filters.
+        
+        Args:
+            season: The season to get games for (e.g., "2024")
+            team_id: Filter games by team ID
+            date: Filter games by date (YYYY-MM-DD format)
+            
+        Returns:
+            List of game dictionaries
+        """
+        params = {}
+        if season:
+            params["season"] = season
+        if team_id:
+            params["team"] = team_id
+        if date:
+            params["date"] = date
+            
+        response = await self._make_request("games", params)
+        return response.get("response", [])
+
 class NBATeamService:
     """Service for NBA team operations"""
     
@@ -371,9 +430,23 @@ class NBATeamService:
         self._team_cache: Dict[str, Team] = {}
         
     @redis_cache(ttl=86400, prefix="nba_teams")  # 24 hour cache for teams
-    async def list_teams(self, league: str = "standard") -> List[Team]:
+    async def list_teams(
+        self,
+        league: str = "standard",
+        conference: Optional[str] = None,
+        division: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> List[Team]:
         """Get list of NBA teams"""
-        data = await self.client._make_request("teams", {"league": league})
+        params = {"league": league}
+        if conference:
+            params["conference"] = conference
+        if division:
+            params["division"] = division
+        if search and len(search) >= 3:
+            params["search"] = search
+            
+        data = await self.client._make_request("teams", params)
         return [Team(**team) for team in data.get("response", [])]
         
     @redis_cache(ttl=3600, prefix="nba_team_stats")  # 1 hour cache for team stats
@@ -401,23 +474,30 @@ class NBAGameService:
     @redis_cache(ttl=300, prefix="nba_games")  # 5 minute cache for games
     async def list_games(
         self,
-        season: str = "2023",
+        season: Optional[str] = None,
         league: str = "standard",
         team_id: Optional[int] = None,
         date: Optional[str] = None,
-        live: bool = False
+        live: bool = False,
+        game_id: Optional[int] = None,
+        h2h: Optional[str] = None
     ) -> List[Game]:
         """Get list of games with optional filters"""
-        params = {
-            "season": season,
-            "league": league
-        }
+        params = {}
+        if season:
+            params["season"] = season
+        if league:
+            params["league"] = league
         if team_id:
             params["team"] = team_id
         if date:
             params["date"] = date
         if live:
             params["live"] = "all"
+        if game_id:
+            params["id"] = game_id
+        if h2h:
+            params["h2h"] = h2h
             
         data = await self.client._make_request("games", params)
         return [Game(**game) for game in data.get("response", [])]
@@ -462,14 +542,16 @@ class NBAPlayerService:
     @redis_cache(ttl=86400, prefix="nba_players")  # 24 hour cache for player info
     async def get_players(
         self,
-        season: str,
+        season: Optional[str] = None,
         team_id: Optional[int] = None,
         name: Optional[str] = None,
         country: Optional[str] = None,
         search: Optional[str] = None
     ) -> List[Player]:
         """Get list of players with optional filters"""
-        params = {"season": season}
+        params = {}
+        if season:
+            params["season"] = season
         if team_id:
             params["team"] = team_id
         if name:
@@ -525,8 +607,8 @@ class NBAStandingService:
     @redis_cache(ttl=3600, prefix="nba_standings")  # 1 hour cache for standings
     async def get_standings(
         self,
-        league: str,
-        season: str,
+        league: str = "standard",
+        season: str = "2023",
         team_id: Optional[int] = None,
         conference: Optional[str] = None,
         division: Optional[str] = None
