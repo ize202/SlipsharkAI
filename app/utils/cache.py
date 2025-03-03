@@ -3,7 +3,7 @@ import json
 import os
 import logging
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, cast, Dict, get_type_hints
+from typing import Any, Callable, Optional, TypeVar, cast, Dict, get_type_hints, Union
 import hashlib
 import pickle
 from datetime import datetime, timedelta
@@ -598,3 +598,12 @@ def memory_cache(maxsize: int = 128, ttl: Optional[int] = None):
         return wrapper
     
     return decorator 
+
+def get_cache_client() -> Union[redis.Redis, None]:
+    """Get the Redis client instance or None if Redis is not available.
+    
+    Returns:
+        redis.Redis: The Redis client instance if available
+        None: If Redis is not available and using memory fallback
+    """
+    return redis_client 

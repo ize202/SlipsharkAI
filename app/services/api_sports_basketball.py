@@ -111,33 +111,39 @@ class Game(BaseModel):
     nugget: Optional[str] = None
 
 class TeamStatistics(BaseModel):
-    """Team statistics model"""
-    games: int
-    fastBreakPoints: int
-    pointsInPaint: int
-    biggestLead: int
-    secondChancePoints: int
-    pointsOffTurnovers: int
-    longestRun: int
-    points: int
-    fgm: int
-    fga: int
-    fgp: str
-    ftm: int
-    fta: int
-    ftp: str
-    tpm: int
-    tpa: int
-    tpp: str
-    offReb: int
-    defReb: int
-    totReb: int
-    assists: int
-    pFouls: int
-    steals: int
-    turnovers: int
-    blocks: int
-    plusMinus: int
+    """Team statistics model matching API Sports NBA documentation"""
+    fastBreakPoints: Optional[int] = 0
+    pointsInPaint: Optional[int] = 0
+    biggestLead: Optional[int] = 0
+    secondChancePoints: Optional[int] = 0
+    pointsOffTurnovers: Optional[int] = 0
+    longestRun: Optional[int] = 0
+    points: Optional[int] = 0
+    fgm: Optional[int] = 0
+    fga: Optional[int] = 0
+    fgp: Optional[str] = "0"
+    ftm: Optional[int] = 0
+    fta: Optional[int] = 0
+    ftp: Optional[str] = "0"
+    tpm: Optional[int] = 0
+    tpa: Optional[int] = 0
+    tpp: Optional[str] = "0"
+    offReb: Optional[int] = 0
+    defReb: Optional[int] = 0
+    totReb: Optional[int] = 0
+    assists: Optional[int] = 0
+    pFouls: Optional[int] = 0
+    steals: Optional[int] = 0
+    turnovers: Optional[int] = 0
+    blocks: Optional[int] = 0
+    plusMinus: Optional[str] = "0"
+    min: Optional[str] = "0"
+
+    def __init__(self, **data):
+        # Convert plusMinus to string if it's an integer
+        if 'plusMinus' in data and isinstance(data['plusMinus'], (int, float)):
+            data['plusMinus'] = str(data['plusMinus'])
+        super().__init__(**data)
 
 class PlayerBirth(BaseModel):
     """Player birth information"""
@@ -398,29 +404,49 @@ class NBAApiClient:
             
         return await self._make_request("standings", params)
 
-    @redis_cache(ttl=3600)
-    async def list_games(self, season: str = None, team_id: int = None, date: str = None) -> List[Dict]:
+    @redis_cache(ttl=300, prefix="nba_games")  # 5 minute cache for games
+    async def list_games(
+        self,
+        id: Optional[int] = None,
+        date: Optional[str] = None,  # YYYY-MM-DD format
+        league: str = "standard",
+        season: Optional[str] = None,
+        team: Optional[int] = None,
+        live: bool = False,
+        h2h: Optional[str] = None  # Format: "1-4" for team IDs
+    ) -> List[Game]:
         """
-        List NBA games based on provided filters.
+        Get list of games with filters as per API Sports NBA documentation.
         
         Args:
-            season: The season to get games for (e.g., "2024")
-            team_id: Filter games by team ID
-            date: Filter games by date (YYYY-MM-DD format)
+            id: The id of the game
+            date: Date in YYYY-MM-DD format
+            league: League name (default: "standard")
+            season: Season year (YYYY format)
+            team: Team ID to filter by
+            live: Whether to get live games only
+            h2h: Head to head games between two teams (format: "teamId1-teamId2")
             
         Returns:
-            List of game dictionaries
+            List of Game objects
         """
-        params = {}
-        if season:
-            params["season"] = season
-        if team_id:
-            params["team"] = team_id
+        params = {"league": league}
+        
+        if id:
+            params["id"] = id
         if date:
             params["date"] = date
+        if season:
+            params["season"] = season
+        if team:
+            params["team"] = team
+        if live:
+            params["live"] = "all"
+        if h2h:
+            params["h2h"] = h2h
             
-        response = await self._make_request("games", params)
-        return response.get("response", [])
+        data = await self._make_request("games", params)
+        return [Game(**game) for game in data.get("response", [])]
 
 class NBATeamService:
     """Service for NBA team operations"""
@@ -463,7 +489,21 @@ class NBATeamService:
         # API returns a list, take the first item
         if not data["response"]:
             raise NBAApiError(f"No statistics found for team {team_id}")
-        return TeamStatistics(**data["response"][0])
+            
+        try:
+            stats = data["response"][0]
+            # Extract total values from dictionary format
+            processed_stats = {}
+            for key, value in stats.items():
+                if isinstance(value, dict) and "total" in value:
+                    processed_stats[key] = value["total"]
+                else:
+                    processed_stats[key] = value
+                    
+            return TeamStatistics(**processed_stats)
+        except Exception as e:
+            logger.error(f"Error parsing team statistics: {str(e)}")
+            raise NBAApiError(f"Failed to parse statistics for team {team_id}: {str(e)}")
 
 class NBAGameService:
     """Service for NBA game operations"""
@@ -572,14 +612,14 @@ class NBAPlayerService:
         team: Optional[int] = None,
         season: Optional[str] = None
     ) -> List[PlayerStatistics]:
-        """Get player statistics with optional filters"""
+        """Get player statistics with optional filters. At least one parameter is required."""
         # API requires at least one parameter
         if not any([player_id, game_id, team, season]):
             raise ValueError("At least one parameter (player_id, game_id, team, or season) is required")
             
         params = {}
         if player_id:
-            params["id"] = player_id  # API expects 'id' not 'player_id'
+            params["id"] = player_id
         if game_id:
             params["game"] = game_id
         if team:
@@ -590,7 +630,7 @@ class NBAPlayerService:
         try:
             data = await self.client._make_request("players/statistics", params)
             if not data.get("response"):
-                logger.warning(f"No statistics found for player (id={player_id}, game={game_id}, team={team}, season={season})")
+                logger.warning(f"No statistics found for parameters: id={player_id}, game={game_id}, team={team}, season={season}")
                 return []
                 
             return [PlayerStatistics(**stats) for stats in data.get("response", [])]

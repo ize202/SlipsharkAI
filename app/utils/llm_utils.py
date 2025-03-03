@@ -102,15 +102,64 @@ async def structured_llm_call(
         raise
 
 def clean_json_string(json_str: str) -> str:
-    """Clean and prepare a string for JSON parsing"""
-    # Remove code block markers
-    json_str = re.sub(r"```json\s*|\s*```", "", json_str)
+    """Clean a JSON string to ensure it can be properly parsed.
     
-    # Remove any json language identifier
-    if json_str.startswith("json"):
-        json_str = json_str[4:]
+    Steps:
+    1. Remove code block markers and any JSON language identifier
+    2. Replace smart quotes with regular quotes
+    3. Handle escaped backslashes
+    4. Handle mixed escaped and unescaped quotes
+    5. Ensure proper escaping of quotes in keys and values
     
-    return json_str.strip()
+    Args:
+        json_str: The JSON string to clean
+        
+    Returns:
+        The cleaned JSON string
+    """
+    # Remove code block markers and language identifier
+    json_str = re.sub(r'```(?:json)?\s*|\s*```', '', json_str)
+    
+    # Replace smart quotes with regular quotes
+    json_str = json_str.replace('"', '"').replace('"', '"')
+    
+    try:
+        # First try to parse it as is
+        json.loads(json_str)
+        return json_str
+    except json.JSONDecodeError:
+        # If that fails, try to clean it up
+        try:
+            # Replace escaped backslashes with a temporary marker
+            json_str = json_str.replace('\\\\', '\x00')
+            
+            # Replace escaped quotes with a temporary marker
+            json_str = json_str.replace('\\"', '\x01')
+            
+            # Remove any remaining backslashes before quotes
+            json_str = json_str.replace('\"', '"')
+            
+            # Convert single quotes to double quotes
+            json_str = json_str.replace("'", '"')
+            
+            # Restore escaped quotes and backslashes
+            json_str = json_str.replace('\x01', '\\"')
+            json_str = json_str.replace('\x00', '\\\\')
+            
+            # Clean up any remaining invalid escapes
+            json_str = re.sub(r'\\([^"\\])', r'\1', json_str)
+            
+            # Validate that we can parse it
+            json.loads(json_str)
+            return json_str
+        except json.JSONDecodeError:
+            # If that fails too, try one more approach
+            try:
+                # Try to parse it as raw string
+                return str(json.loads(json_str.encode('utf-8').decode('unicode-escape')))
+            except:
+                # If all else fails, return the original string
+                return json_str
 
 def validate_json_response(response: str) -> Dict[str, Any]:
     """Validate and parse a JSON response string"""

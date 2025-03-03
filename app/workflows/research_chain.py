@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import asyncio
 from typing import List, Dict, Any, Union, Optional
@@ -17,14 +17,20 @@ from app.services.perplexity import PerplexityService
 from app.services.basketball_service import BasketballService
 from app.services.supabase import SupabaseService
 from app.services.client_metadata_service import ClientMetadataService
+from app.services.transformer_service import TransformerService
 from app.utils.llm_utils import structured_llm_call, json_serialize
 from app.utils.prompt_manager import get_query_analysis_prompt, get_response_generation_prompt
-from app.config import get_logger
+from app.config import get_logger, get_settings
 from langfuse.decorators import observe
-from app.utils.cache import redis_cache
+from app.utils.cache import redis_cache, get_cache_client
 from app.services.date_resolution_service import DateResolutionService
+from app.utils.langfuse import get_langfuse_client
+from app.utils.prompt_manager import PromptManager
 
 logger = get_logger(__name__)
+settings = get_settings()
+langfuse = get_langfuse_client()
+cache = get_cache_client()
 
 class ResearchChain:
     """
@@ -34,7 +40,8 @@ class ResearchChain:
     Flow:
     1. Query Analysis (LLM Call 1)
     2. Data Gathering (Web Search + Sports API)
-    3. Response Generation (LLM Call 2)
+    3. Data Transformation (Sport-specific transformers)
+    4. Response Generation (LLM Call 2)
     """
 
     def __init__(self):
@@ -44,6 +51,8 @@ class ResearchChain:
         self.supabase = SupabaseService()
         self.client_metadata_service = ClientMetadataService()
         self.date_resolution_service = DateResolutionService()
+        self.transformer_service = TransformerService()
+        self.prompt_manager = PromptManager()
 
     async def _ensure_basketball_service(self):
         """Ensure basketball service is initialized in async context"""
@@ -106,9 +115,10 @@ class ResearchChain:
     async def _gather_data(self, analysis: QueryAnalysis, request: ResearchRequest) -> List[DataPoint]:
         """Gather data based on determined research mode"""
         data_points: List[DataPoint] = []
+        required_data = request.context.required_data if request.context else []
         
         try:
-            # Let PerplexityService handle the web search - no need for client metadata here
+            # Always get web search data first
             perplexity_response = await self.perplexity.quick_research(
                 query=analysis.raw_query
             )
@@ -119,51 +129,91 @@ class ResearchChain:
                 confidence=0.8
             ))
             
-            # For deep research, add sports API data with proper time context
-            if analysis.recommended_mode == ResearchMode.DEEP:
+            # If sports data is required, get it regardless of mode
+            if required_data and any(data_type in required_data for data_type in ["team_stats", "recent_games", "player_stats"]):
                 basketball = await self._ensure_basketball_service()
                 
                 # Get team data if teams are mentioned
-                team_data = {}
-                required_data = request.context.required_data if request.context else []
+                raw_data = {"team_data": {}, "game_data": {}, "player_data": {}}
                 
+                # Get team data for each team
                 for team_key, team in analysis.teams.items():
                     if team:
                         # Pass client metadata for proper time context in sports API calls
-                        team_data[team] = await basketball.get_team_data(
+                        team_data = await basketball.get_team_data(
                             team_name=team,
                             client_metadata=request.client_metadata,
                             game_date=analysis.game_date,
                             include_games="recent_games" in required_data,
                             include_stats="team_stats" in required_data
                         )
-                        if team_data[team]:
+                        
+                        # Add team data to raw_data
+                        raw_data["team_data"][team] = team_data
+                        
+                        # Also add it directly as a data point for immediate access
+                        data_points.append(DataPoint(
+                            source="basketball_api",
+                            content=team_data,
+                            confidence=0.9
+                        ))
+                
+                # Get player data if players are mentioned and player_stats is required
+                if "player_stats" in required_data:
+                    for player in analysis.players:
+                        if player:
+                            # Get team for this player if available
+                            team = next((team for team_key, team in analysis.teams.items() if team), None)
+                            
+                            # Pass client metadata for proper time context in sports API calls
+                            player_data = await basketball.get_player_data(
+                                player_name=player,
+                                client_metadata=request.client_metadata,
+                                team_name=team,
+                                game_date=analysis.game_date
+                            )
+                            
+                            # Add player data to raw_data
+                            raw_data["player_data"][player] = player_data
+                            
+                            # Also add it directly as a data point
                             data_points.append(DataPoint(
                                 source="basketball_api",
-                                content=team_data[team],
+                                content=player_data,
                                 confidence=0.9
                             ))
                 
-                # Get player data if players are mentioned
-                player_data = {}
-                for player in analysis.players:
-                    if player:
-                        # Get team for this player if available
-                        team = next((team for team_key, team in analysis.teams.items() if team), None)
-                        
-                        # Pass client metadata for proper time context in sports API calls
-                        player_data[player] = await basketball.get_player_data(
-                            player_name=player,
-                            client_metadata=request.client_metadata,
-                            team_name=team,
-                            game_date=analysis.game_date
-                        )
-                        if player_data[player]:
-                            data_points.append(DataPoint(
-                                source="basketball_api",
-                                content=player_data[player],
-                                confidence=0.9
-                            ))
+                # Transform the raw data using our transformer service
+                transformed_data = await self.transformer_service.transform_data(
+                    sport=analysis.sport_type.lower(),
+                    raw_data=raw_data,
+                    required_data=required_data,
+                    trace_id=request.trace_id
+                )
+                
+                # Add transformed data to data points
+                if transformed_data.team_data:
+                    for team, team_data in transformed_data.team_data.items():
+                        data_points.append(DataPoint(
+                            source="basketball_api",
+                            content=team_data,
+                            confidence=0.9
+                        ))
+                
+                if transformed_data.player_data:
+                    for player, player_data in transformed_data.player_data.items():
+                        data_points.append(DataPoint(
+                            source="basketball_api",
+                            content=player_data,
+                            confidence=0.9
+                        ))
+                
+                if transformed_data.game_data:
+                    data_points.append(DataPoint(
+                        source="basketball_api",
+                        content={"games": transformed_data.game_data},
+                        confidence=0.9
+                    ))
             
             return data_points
                 
@@ -171,7 +221,7 @@ class ResearchChain:
             logger.error(f"Error gathering data: {str(e)}")
             raise
         finally:
-            if analysis.recommended_mode == ResearchMode.DEEP and self.basketball:
+            if self.basketball:
                 await self._cleanup_basketball_service()
 
     @observe(name="generate_response")
@@ -183,26 +233,11 @@ class ResearchChain:
     ) -> ResearchResponse:
         """[LLM Call 2] Generate the final response"""
         try:
-            # Filter and truncate data points to reduce context size
-            filtered_data_points = []
-            for dp in data_points:
-                if dp.source == "basketball_api" and isinstance(dp.content, dict):
-                    # Limit games data to most recent 5 games
-                    if "games" in dp.content:
-                        dp.content["games"] = dp.content["games"][:5]
-                    # Only include essential statistics
-                    if "statistics" in dp.content:
-                        essential_stats = ["games", "wins", "losses", "points", "fga", "fgm", "fta", "ftm"]
-                        dp.content["statistics"] = {
-                            k: v for k, v in dp.content["statistics"].items() 
-                            if k in essential_stats
-                        }
-                filtered_data_points.append(dp)
-            
-            # Prepare data for the LLM with reduced context
+            # Data points are already filtered and transformed by the transformer service
+            # Prepare data for the LLM
             data_context = {
                 "query": query,
-                "data_points": [dp.model_dump(mode='json') for dp in filtered_data_points],
+                "data_points": [dp.model_dump(mode='json') for dp in data_points],
                 "context": context.model_dump(mode='json') if context else {}
             }
             
@@ -266,10 +301,7 @@ class ResearchChain:
         await self._cleanup_basketball_service()
 
     async def _cleanup_basketball_service(self):
-        """Clean up basketball service resources"""
+        """Clean up basketball service if initialized"""
         if self.basketball:
-            try:
-                await self.basketball.__aexit__(None, None, None)
-                self.basketball = None
-            except Exception as e:
-                logger.error(f"Error cleaning up basketball service: {str(e)}")
+            await self.basketball.__aexit__(None, None, None)
+            self.basketball = None

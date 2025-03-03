@@ -3,12 +3,32 @@ Utility functions for managing prompts with Langfuse.
 """
 
 from langfuse import Langfuse
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 from app.config import get_logger
 from app.config.langfuse_init import langfuse
 
 logger = get_logger(__name__)
+
+class PromptManager:
+    """Manages prompts and their interactions with Langfuse"""
+    
+    def __init__(self, langfuse_client: Optional[Langfuse] = None):
+        """Initialize the PromptManager with a Langfuse client"""
+        self.langfuse = langfuse_client or langfuse
+        
+    def get_prompt(self, prompt_name: str) -> Dict[str, str]:
+        """Get a prompt by name from Langfuse"""
+        try:
+            if prompt_name == "query_analysis":
+                return get_query_analysis_prompt()
+            elif prompt_name == "response_generation":
+                return get_response_generation_prompt()
+            else:
+                raise KeyError(f"Prompt '{prompt_name}' not found")
+        except Exception as e:
+            logger.error(f"Error getting prompt '{prompt_name}': {str(e)}")
+            raise
 
 # Initialize prompts in Langfuse
 def initialize_research_prompts():

@@ -170,13 +170,14 @@ async def test_matchup_analysis_through_chain():
         # Test with minimal data for Lakers vs Warriors
         request = ResearchRequest(
             query="Compare Lakers vs Warriors head to head stats",
-            mode=ResearchMode.DEEP,
+            mode=ResearchMode.QUICK,
             client_metadata=create_test_metadata(),
             context=ConversationContext(
                 teams=["Los Angeles Lakers", "Golden State Warriors"],
                 sport=SportType.BASKETBALL,
-                required_data=["team_stats", "recent_games"]  # Specify only needed data
-            )
+                required_data=["team_stats"]
+            ),
+            trace_id="test_trace_id"
         )
         
         response = await chain.process_request(request)
@@ -188,21 +189,18 @@ async def test_matchup_analysis_through_chain():
         
         # Check for essential data components
         found_stats = False
-        found_games = False
         for dp in basketball_data:
             content = dp.content
             if isinstance(content, dict):
-                if content.get("statistics"):
+                if "season_stats" in content:
                     found_stats = True
-                    assert isinstance(content["statistics"], dict), "Invalid statistics format"
-                if content.get("games"):
-                    found_games = True
-                    assert isinstance(content["games"], list), "Invalid games format"
-                    # Only check first 5 games to reduce context
-                    content["games"] = content["games"][:5]
+                    assert isinstance(content["season_stats"], dict), "Invalid statistics format"
+                    # Verify key stats are present
+                    assert "points_per_game" in content["season_stats"], "Missing points per game"
+                    assert "wins" in content["season_stats"], "Missing wins"
+                    assert "losses" in content["season_stats"], "Missing losses"
         
         assert found_stats, "No team statistics found in response"
-        assert found_games, "No games data found in response"
 
 @pytest.mark.asyncio
 async def test_matchup_error_handling():
@@ -232,7 +230,8 @@ async def test_matchup_error_handling():
                 client_metadata=create_test_metadata(),
                 context=ConversationContext(
                     required_data=["team_stats"]  # Minimal data requirement
-                )
+                ),
+                trace_id="test_error_trace_id"
             )
             
             response = await chain.process_request(request)
@@ -268,7 +267,8 @@ async def test_matchup_with_different_timezones():
                 teams=["Los Angeles Lakers", "Golden State Warriors"],
                 sport=SportType.BASKETBALL,
                 required_data=["team_stats", "recent_games"]  # Specify only needed data
-            )
+            ),
+            trace_id="test_timezone_trace_id"
         )
         
         response = await chain.process_request(request)

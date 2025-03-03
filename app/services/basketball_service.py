@@ -190,18 +190,91 @@ class BasketballService:
                     "id": team.id,
                     "name": team.name,
                     "team_info": team.model_dump(),
-                    "season_context": season_context
+                    "season_context": season_context,
+                    "season_stats": {},  # Only keep transformed stats
+                    "statistics": {}  # Raw statistics
                 }
                 
                 # Add results based on what was requested
                 result_idx = 0
                 if include_stats:
-                    result["statistics"] = team_results[result_idx].model_dump() if not isinstance(team_results[result_idx], Exception) else {"error": str(team_results[result_idx])}
+                    stats_data = team_results[result_idx] if not isinstance(team_results[result_idx], Exception) else None
+                    if stats_data:
+                        # Store raw statistics
+                        result["statistics"] = stats_data.model_dump()
+                        # Transform stats for season_stats
+                        result["season_stats"] = {
+                            "games_played": stats_data.games if hasattr(stats_data, "games") else 0,
+                            "points_per_game": stats_data.points if hasattr(stats_data, "points") else 0,
+                            "rebounds_per_game": stats_data.totReb if hasattr(stats_data, "totReb") else 0,
+                            "assists_per_game": stats_data.assists if hasattr(stats_data, "assists") else 0,
+                            "field_goal_percentage": stats_data.fgp if hasattr(stats_data, "fgp") else "0",
+                            "three_point_percentage": stats_data.tpp if hasattr(stats_data, "tpp") else "0",
+                            "free_throw_percentage": stats_data.ftp if hasattr(stats_data, "ftp") else "0",
+                            "wins": 0,  # Will be updated from standings
+                            "losses": 0  # Will be updated from standings
+                        }
                     result_idx += 1
                 if include_games:
-                    result["games"] = [g.model_dump() for g in team_results[result_idx]] if not isinstance(team_results[result_idx], Exception) else {"error": str(team_results[result_idx])}
+                    games_data = team_results[result_idx] if not isinstance(team_results[result_idx], Exception) else []
+                    # Limit to last 5 games and transform
+                    if isinstance(games_data, list):
+                        result["games"] = []
+                        for g in games_data[-5:]:  # Only last 5 games
+                            try:
+                                teams = g.teams if hasattr(g, "teams") else {}
+                                scores = g.scores if hasattr(g, "scores") else {}
+                                status = g.status if hasattr(g, "status") else {}
+                                
+                                # Get team data with defaults
+                                home_team = teams.get("home", {})
+                                away_team = teams.get("away", {})
+                                home_score = scores.get("home", 0)
+                                away_score = scores.get("away", 0)
+                                
+                                game_dict = {
+                                    "date": g.date if hasattr(g, "date") else "Unknown",
+                                    "teams": {
+                                        "home": {
+                                            "name": home_team.get("name", "Unknown"),
+                                            "points": home_score
+                                        },
+                                        "away": {
+                                            "name": away_team.get("name", "Unknown"),
+                                            "points": away_score
+                                        }
+                                    },
+                                    "status": status.get("long", "Unknown")
+                                }
+                                result["games"].append(game_dict)
+                            except Exception as e:
+                                logger.warning(f"Error processing game data: {str(e)}")
+                                continue
+                    else:
+                        result["games"] = []
                     result_idx += 1
-                result["standings"] = [s.model_dump() for s in team_results[result_idx]] if not isinstance(team_results[result_idx], Exception) else {"error": str(team_results[result_idx])}
+                
+                # Process standings data
+                standings_data = team_results[result_idx] if not isinstance(team_results[result_idx], Exception) else []
+                if standings_data:
+                    result["standings"] = []
+                    for s in standings_data:
+                        try:
+                            standing_dict = {
+                                "conference": s.conference.name if hasattr(s.conference, "name") else "Unknown",
+                                "division": s.division.name if hasattr(s.division, "name") else "Unknown",
+                                "rank": s.conference.rank if hasattr(s.conference, "rank") else 0,
+                                "win_loss_percentage": s.win.percentage if hasattr(s.win, "percentage") else "0"
+                            }
+                            result["standings"].append(standing_dict)
+                            
+                            # Update wins/losses in season_stats
+                            if "season_stats" in result:
+                                result["season_stats"]["wins"] = s.win.total if hasattr(s.win, "total") else 0
+                                result["season_stats"]["losses"] = s.loss.total if hasattr(s.loss, "total") else 0
+                        except Exception as e:
+                            logger.warning(f"Error processing standings data: {str(e)}")
+                            continue
                 
                 return result
                 

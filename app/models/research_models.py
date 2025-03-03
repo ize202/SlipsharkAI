@@ -126,6 +126,10 @@ class ResearchRequest(BaseModel):
         default_factory=ClientMetadata,
         description="Metadata about the client making the request"
     )
+    trace_id: Optional[str] = Field(
+        default=None,
+        description="Langfuse trace ID for observability"
+    )
 
 class ResearchResponse(BaseModel):
     """Unified research response"""
