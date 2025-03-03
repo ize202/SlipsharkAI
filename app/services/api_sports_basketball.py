@@ -655,11 +655,53 @@ class NBASeasonService:
     
     def __init__(self, client: NBAApiClient):
         self.client = client
+        self._current_season = None  # Cache current season
         
+    @redis_cache(ttl=86400, prefix="nba_seasons")  # 24 hour cache
     async def list_seasons(self) -> List[int]:
         """Get list of available seasons"""
         data = await self.client._make_request("seasons")
-        return data.get("response", [])
+        seasons = sorted(data.get("response", []), reverse=True)  # Sort descending
+        if not seasons:
+            # If API fails, default to known supported seasons
+            seasons = list(range(2015, 2025))  # API supports 2015-2024
+        return seasons
+
+    async def get_current_season(self, client_metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        """
+        Get the current NBA season based on client metadata timestamp or API data.
+        
+        Args:
+            client_metadata: Optional client metadata containing timestamp
+            
+        Returns:
+            Current season as integer
+        """
+        try:
+            # If we have client metadata with timestamp, use that
+            if client_metadata and client_metadata.get("timestamp"):
+                timestamp = datetime.fromisoformat(client_metadata["timestamp"].replace("Z", "+00:00"))
+                # NBA seasons span calendar years (e.g. 2023-24 season is "2023")
+                if timestamp.month <= 6:  # Before July is previous year's season
+                    return timestamp.year - 1
+                return timestamp.year
+                
+            # Otherwise use cached season or fetch from API
+            if self._current_season is not None:
+                return self._current_season
+                
+            seasons = await self.list_seasons()
+            if not seasons:
+                logger.error("No seasons returned from API")
+                return None
+                
+            # Get most recent season (first since we sort descending)
+            self._current_season = seasons[0]
+            return self._current_season
+            
+        except Exception as e:
+            logger.error(f"Error getting current season: {str(e)}")
+            return None
 
 class NBALeagueService:
     """Service for NBA league operations"""

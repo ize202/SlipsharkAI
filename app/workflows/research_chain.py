@@ -29,7 +29,6 @@ from app.utils.prompt_manager import PromptManager
 
 logger = get_logger(__name__)
 settings = get_settings()
-langfuse = get_langfuse_client()
 cache = get_cache_client()
 
 class ResearchChain:
@@ -118,6 +117,12 @@ class ResearchChain:
         required_data = request.context.required_data if request.context else []
         
         try:
+            # Ensure we have valid client metadata
+            if not request.client_metadata:
+                request.client_metadata = self.client_metadata_service.create_metadata(
+                    timezone=request.timezone if hasattr(request, 'timezone') else None
+                )
+            
             # Always get web search data first
             perplexity_response = await self.perplexity.quick_research(
                 query=analysis.raw_query
@@ -129,14 +134,13 @@ class ResearchChain:
                 confidence=0.8
             ))
             
-            # If sports data is required, get it regardless of mode
-            if required_data and any(data_type in required_data for data_type in ["team_stats", "recent_games", "player_stats"]):
+            # For deep mode or if sports data is explicitly required, get sports data
+            if analysis.recommended_mode == ResearchMode.DEEP or (required_data and any(data_type in required_data for data_type in ["team_stats", "recent_games", "player_stats", "matchups"])):
                 basketball = await self._ensure_basketball_service()
                 
-                # Get team data if teams are mentioned
+                # Get team data for each team
                 raw_data = {"team_data": {}, "game_data": {}, "player_data": {}}
                 
-                # Get team data for each team
                 for team_key, team in analysis.teams.items():
                     if team:
                         # Pass client metadata for proper time context in sports API calls
@@ -144,8 +148,8 @@ class ResearchChain:
                             team_name=team,
                             client_metadata=request.client_metadata,
                             game_date=analysis.game_date,
-                            include_games="recent_games" in required_data,
-                            include_stats="team_stats" in required_data
+                            include_games="recent_games" in required_data or analysis.recommended_mode == ResearchMode.DEEP,
+                            include_stats="team_stats" in required_data or analysis.recommended_mode == ResearchMode.DEEP
                         )
                         
                         # Add team data to raw_data
@@ -158,8 +162,8 @@ class ResearchChain:
                             confidence=0.9
                         ))
                 
-                # Get player data if players are mentioned and player_stats is required
-                if "player_stats" in required_data:
+                # If in deep mode or player stats required, get player data
+                if "player_stats" in required_data or analysis.recommended_mode == ResearchMode.DEEP:
                     for player in analysis.players:
                         if player:
                             # Get team for this player if available
@@ -182,6 +186,22 @@ class ResearchChain:
                                 content=player_data,
                                 confidence=0.9
                             ))
+                
+                # If in deep mode or matchups required, get matchup data
+                if len(analysis.teams) >= 2 and ("matchups" in required_data or analysis.recommended_mode == ResearchMode.DEEP):
+                    teams = list(analysis.teams.values())
+                    matchup_data = await basketball.get_matchup_data(
+                        team1_name=teams[0],
+                        team2_name=teams[1],
+                        client_metadata=request.client_metadata,
+                        game_date=analysis.game_date
+                    )
+                    if matchup_data:
+                        data_points.append(DataPoint(
+                            source="basketball_api",
+                            content={"matchup_data": matchup_data},
+                            confidence=0.9
+                        ))
                 
                 # Transform the raw data using our transformer service
                 transformed_data = await self.transformer_service.transform_data(

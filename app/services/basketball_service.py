@@ -147,6 +147,17 @@ class BasketballService:
             Dictionary containing team data
         """
         try:
+            # Get current season
+            current_season = await self.seasons.get_current_season(client_metadata)
+            if not current_season:
+                logger.error("Failed to get current season")
+                return {"error": "Failed to get current season"}
+            
+            # Resolve game date if provided
+            resolved_date = None
+            if game_date:
+                resolved_date = self._resolve_game_date(game_date, client_metadata)
+            
             # First try to get team ID from static mapping
             team_id = NBA_TEAM_IDS.get(team_name.lower())
             team = None
@@ -172,17 +183,17 @@ class BasketballService:
                 
                 # Add tasks based on what data is requested
                 if include_stats:
-                    team_tasks.append(self.teams.get_team_statistics(team_id, season=str(season)))
+                    team_tasks.append(self.teams.get_team_statistics(team_id, season=str(current_season)))
                 if include_games:
                     team_tasks.append(self.games.list_games(
-                        season=str(season),
+                        season=str(current_season),
                         team_id=team_id,
                         date=self.date_service.format_date_for_api(resolved_date) if resolved_date else None
                     ))
                 # Always get standings
                 team_tasks.append(self.standings.get_standings(
                     league="standard",
-                    season=str(season),
+                    season=str(current_season),
                     team_id=team_id
                 ))
                 
@@ -303,197 +314,269 @@ class BasketballService:
         self,
         player_name: str,
         team_name: Optional[str] = None,
-        game_date: Optional[str] = None,
         client_metadata: Optional[ClientMetadata] = None,
-        season: Optional[str] = None
+        game_date: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get data for a specific player"""
-        nba = await self._ensure_nba_service()
-        current_season = season or self.date_handler.determine_season(datetime.now())
+        """
+        Get player data including current season stats
         
-        logger.info(f"Getting player data for {player_name}, team: {team_name}, season: {current_season}")
-        
+        Args:
+            player_name: Name of the player
+            team_name: Optional team name to filter by
+            client_metadata: Optional client metadata for timezone/locale
+            game_date: Optional date reference for game data
+            
+        Returns:
+            Dictionary containing player data
+        """
         try:
-            # Get team ID from static mapping first if team name provided
+            # Get current season
+            current_season = await self.seasons.get_current_season(client_metadata)
+            if not current_season:
+                logger.error("Failed to get current season")
+                return {"error": "Failed to get current season"}
+            
+            # Resolve game date if provided
+            resolved_date = None
+            if game_date and client_metadata:
+                resolved_date = self._resolve_game_date(game_date, client_metadata)
+            
+            # If team name provided, get team ID first
             team_id = None
             if team_name:
                 team_id = NBA_TEAM_IDS.get(team_name.lower())
                 if not team_id:
-                    # Fallback to API lookup
-                    team_info = await self.find_team(team_name, current_season)
-                    logger.debug(f"Team lookup result for {team_name}: {team_info}")
-                    if team_info:
-                        team_id = team_info["id"]
-                    else:
-                        logger.error(f"Could not find team ID for team name: {team_name}")
-                        return {"error": f"Could not find team: {team_name}"}
+                    teams = await self.teams.list_teams()
+                    team = next((t for t in teams if t.name.lower() == team_name.lower()), None)
+                    if team:
+                        team_id = team.id
             
-            # Split player name into first and last name
-            name_parts = player_name.strip().split(" ", 1)
-            if len(name_parts) != 2:
-                logger.error(f"Invalid player name format: {player_name}")
-                return {"error": f"Invalid player name format. Expected 'First Last', got: {player_name}"}
-            
-            first_name, last_name = name_parts
-            
-            # Search for player with team filter if available
-            search_params = {
-                "name": f"{last_name}",  # Search by last name for better results
-                "season": str(current_season)
-            }
-            
-            if team_id:
-                search_params["team"] = team_id
-            
-            logger.debug(f"Searching for player with params: {search_params}")
-            players = await nba.players.get_players(**search_params)
+            # Search for player
+            players = await self.players.list_players(
+                season=str(current_season),
+                team=team_id,
+                search=player_name
+            )
             
             if not players:
-                logger.warning(f"No players found matching {player_name}")
-                return {"error": f"No players found matching {player_name}"}
+                return {"error": f"Player not found: {player_name}"}
             
             # Find exact match or closest match
             player = None
             for p in players:
-                if (p.firstname.lower() == first_name.lower() and 
-                    p.lastname.lower() == last_name.lower()):
+                if p.firstname.lower() + " " + p.lastname.lower() == player_name.lower():
                     player = p
-                    logger.info(f"Found exact match for player {player_name}")
                     break
             
             if not player:
-                # Take first result if no exact match
+                # Take first result as closest match
                 player = players[0]
-                logger.info(f"No exact match found, using first result for {player_name}")
             
             try:
-                # Get player's current team if not provided
-                if not team_id and player.leagues and player.leagues.standard:
-                    logger.debug(f"Attempting to find team ID from player leagues data")
-                    # Try to get team from player's current league info
-                    if hasattr(player.leagues.standard, "team") and player.leagues.standard.team:
-                        team_id = player.leagues.standard.team.get("id")
-                        logger.info(f"Found team ID {team_id} from player leagues data")
-                
-                if not team_id:
-                    logger.error(f"Could not find team ID for player {player_name}")
-                    return {"error": f"Could not find team for player {player_name}"}
-                
-                logger.info(f"Getting player statistics with team_id={team_id}, player_id={player.id}, season={current_season}")
-                # Get player statistics with both player_id and team_id
-                stats = await nba.players.get_player_statistics(
-                    team=int(team_id),  # Team ID must be first
+                # Get player statistics for current season
+                stats = await self.players.get_player_statistics(
                     player_id=player.id,
                     season=str(current_season)
                 )
                 
-                # Get recent games if date provided
-                games = []
-                if game_date and client_metadata:
-                    resolved_date = self._resolve_game_date(game_date, client_metadata)
-                    if resolved_date:
-                        games = await nba.games.list_games(
-                            season=str(current_season),
-                            team_id=team_id,
-                            date=self.date_service.format_date_for_api(resolved_date)
-                        )
+                # Add season phase if we have a game date
+                season_context = {}
+                if resolved_date:
+                    season_context = {
+                        "phase": self.date_handler.get_season_phase(resolved_date),
+                        "is_playoff_period": self.date_handler.is_playoff_period(resolved_date)
+                    }
                 
-                return {
-                    "player": player.model_dump(),
-                    "statistics": [s.model_dump() for s in stats] if stats else [],
-                    "games": [g.model_dump() for g in games] if games else []
+                # Build response
+                result = {
+                    "id": player.id,
+                    "name": f"{player.firstname} {player.lastname}",
+                    "player_info": player.model_dump(),
+                    "season_context": season_context,
+                    "season_stats": {},  # Only keep transformed stats
+                    "statistics": {}  # Raw statistics
                 }
                 
-            except Exception as e:
-                logger.error(f"Error getting statistics for player {player_name}: {str(e)}", exc_info=True)
-                return {"error": f"Failed to get player statistics: {str(e)}"}
+                # Process statistics if available
+                if stats:
+                    # Store raw statistics
+                    result["statistics"] = stats.model_dump()
+                    
+                    # Transform stats for season_stats
+                    result["season_stats"] = {
+                        "games_played": stats.games if hasattr(stats, "games") else 0,
+                        "points_per_game": stats.points if hasattr(stats, "points") else 0,
+                        "rebounds_per_game": stats.totReb if hasattr(stats, "totReb") else 0,
+                        "assists_per_game": stats.assists if hasattr(stats, "assists") else 0,
+                        "field_goal_percentage": stats.fgp if hasattr(stats, "fgp") else "0",
+                        "three_point_percentage": stats.tpp if hasattr(stats, "tpp") else "0",
+                        "free_throw_percentage": stats.ftp if hasattr(stats, "ftp") else "0",
+                        "minutes_per_game": stats.min if hasattr(stats, "min") else "0"
+                    }
                 
+                return result
+                
+            except Exception as e:
+                logger.error(f"Error getting stats for player {player_name}: {str(e)}")
+                return {"error": f"Failed to get stats for player {player_name}: {str(e)}"}
+            
         except Exception as e:
-            logger.error(f"Error getting player data: {str(e)}", exc_info=True)
-            return {"error": f"Failed to get player data: {str(e)}"}
+            logger.error(f"Error getting player data for {player_name}: {str(e)}")
+            return {}
 
     @observe(name="get_matchup_data")
-    async def get_matchup_data(self, team1_name: str, team2_name: str, season: Optional[str] = None) -> Dict[str, Any]:
-        """Get data for a matchup between two teams"""
-        nba = await self._ensure_nba_service()
+    async def get_matchup_data(
+        self,
+        team1_name: str,
+        team2_name: str,
+        client_metadata: ClientMetadata,
+        game_date: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get matchup data between two teams
         
-        # Use provided season or determine current season
-        season_to_use = season or self.date_handler.determine_season(datetime.now())
-        
+        Args:
+            team1_name: Name of first team
+            team2_name: Name of second team
+            client_metadata: Client metadata for timezone/locale
+            game_date: Optional date reference for game data
+            
+        Returns:
+            Dictionary containing matchup data
+        """
         try:
-            # Get team IDs directly from mapping
+            # Get current season
+            current_season = await self.seasons.get_current_season(client_metadata)
+            if not current_season:
+                logger.error("Failed to get current season")
+                return {"error": "Failed to get current season"}
+            
+            # Resolve game date if provided
+            resolved_date = None
+            if game_date:
+                resolved_date = self._resolve_game_date(game_date, client_metadata)
+            
+            # Get team IDs from static mapping first
             team1_id = NBA_TEAM_IDS.get(team1_name.lower())
             team2_id = NBA_TEAM_IDS.get(team2_name.lower())
             
+            # Fallback to API lookup if not found in mapping
             if not team1_id or not team2_id:
-                # Fallback to API lookup only if not found in mapping
-                team1_info = await self.find_team(team1_name, season_to_use)
-                team2_info = await self.find_team(team2_name, season_to_use)
+                teams = await self.teams.list_teams()
+                if not team1_id:
+                    team1 = next((t for t in teams if t.name.lower() == team1_name.lower()), None)
+                    if not team1:
+                        return {"error": f"Team not found: {team1_name}"}
+                    team1_id = team1.id
+                if not team2_id:
+                    team2 = next((t for t in teams if t.name.lower() == team2_name.lower()), None)
+                    if not team2:
+                        return {"error": f"Team not found: {team2_name}"}
+                    team2_id = team2.id
+            
+            try:
+                # Get games between teams
+                games = await self.games.list_games(
+                    season=str(current_season),
+                    team_id=team1_id,
+                    date=self.date_service.format_date_for_api(resolved_date) if resolved_date else None
+                )
                 
-                if not team1_info or not team2_info:
-                    return {"error": f"One or both teams not found: {team1_name} vs {team2_name}"}
-                    
-                team1_id = team1_info["id"]
-                team2_id = team2_info["id"]
-            
-            # Get games for both teams
-            team1_games = await nba.games.list_games(
-                season=season_to_use,
-                team_id=team1_id
-            )
-            team2_games = await nba.games.list_games(
-                season=season_to_use,
-                team_id=team2_id
-            )
-            
-            # Combine and filter for games between these two teams
-            all_games = team1_games + team2_games
-            matchup_games = [
-                g.model_dump() for g in all_games 
-                if (g.teams["home"]["id"] == team1_id and g.teams["visitors"]["id"] == team2_id) or
-                   (g.teams["home"]["id"] == team2_id and g.teams["visitors"]["id"] == team1_id)
-            ]
-            
-            # Remove duplicates (games appearing in both lists)
-            seen_ids = set()
-            unique_matchup_games = []
-            for game in matchup_games:
-                if game["id"] not in seen_ids:
-                    seen_ids.add(game["id"])
-                    unique_matchup_games.append(game)
-            
-            # Get team stats for comparison
-            team1_stats = await self.teams.get_team_statistics(team1_id, season=str(season_to_use))
-            team2_stats = await self.teams.get_team_statistics(team2_id, season=str(season_to_use))
-            
-            return {
-                "team1": {
-                    "id": team1_id,
-                    "name": team1_name,
-                    "statistics": team1_stats.model_dump() if team1_stats else {}
-                },
-                "team2": {
-                    "id": team2_id,
-                    "name": team2_name,
-                    "statistics": team2_stats.model_dump() if team2_stats else {}
-                },
-                "matchup_games": unique_matchup_games,
-                "head_to_head_summary": {
-                    "total_games": len(unique_matchup_games),
-                    "team1_wins": sum(1 for g in unique_matchup_games if 
-                        (g["teams"]["home"]["id"] == team1_id and g["scores"]["home"]["points"] > g["scores"]["visitors"]["points"]) or
-                        (g["teams"]["visitors"]["id"] == team1_id and g["scores"]["visitors"]["points"] > g["scores"]["home"]["points"])
-                    ),
-                    "team2_wins": sum(1 for g in unique_matchup_games if 
-                        (g["teams"]["home"]["id"] == team2_id and g["scores"]["home"]["points"] > g["scores"]["visitors"]["points"]) or
-                        (g["teams"]["visitors"]["id"] == team2_id and g["scores"]["visitors"]["points"] > g["scores"]["home"]["points"])
-                    )
+                # Filter for games between these teams
+                matchup_games = []
+                for game in games:
+                    try:
+                        teams = game.teams if hasattr(game, "teams") else {}
+                        scores = game.scores if hasattr(game, "scores") else {}
+                        status = game.status if hasattr(game, "status") else {}
+                        
+                        home_team = teams.get("home", {})
+                        away_team = teams.get("away", {})
+                        
+                        # Check if game involves both teams
+                        if ((home_team.get("id") == team1_id and away_team.get("id") == team2_id) or
+                            (home_team.get("id") == team2_id and away_team.get("id") == team1_id)):
+                            
+                            game_dict = {
+                                "date": game.date if hasattr(game, "date") else "Unknown",
+                                "teams": {
+                                    "home": {
+                                        "name": home_team.get("name", "Unknown"),
+                                        "points": scores.get("home", 0)
+                                    },
+                                    "away": {
+                                        "name": away_team.get("name", "Unknown"),
+                                        "points": scores.get("away", 0)
+                                    }
+                                },
+                                "status": status.get("long", "Unknown")
+                            }
+                            matchup_games.append(game_dict)
+                    except Exception as e:
+                        logger.warning(f"Error processing game data: {str(e)}")
+                        continue
+                
+                # Add season phase if we have a game date
+                season_context = {}
+                if resolved_date:
+                    season_context = {
+                        "phase": self.date_handler.get_season_phase(resolved_date),
+                        "is_playoff_period": self.date_handler.is_playoff_period(resolved_date)
+                    }
+                
+                # Get team statistics in parallel
+                team_tasks = [
+                    self.teams.get_team_statistics(team1_id, season=str(current_season)),
+                    self.teams.get_team_statistics(team2_id, season=str(current_season))
+                ]
+                
+                team_stats = await asyncio.gather(*team_tasks, return_exceptions=True)
+                
+                # Process team statistics
+                team1_stats = team_stats[0] if not isinstance(team_stats[0], Exception) else None
+                team2_stats = team_stats[1] if not isinstance(team_stats[1], Exception) else None
+                
+                result = {
+                    "teams": {
+                        "team1": {
+                            "id": team1_id,
+                            "name": team1_name,
+                            "season_stats": self._transform_team_stats(team1_stats) if team1_stats else {}
+                        },
+                        "team2": {
+                            "id": team2_id,
+                            "name": team2_name,
+                            "season_stats": self._transform_team_stats(team2_stats) if team2_stats else {}
+                        }
+                    },
+                    "season_context": season_context,
+                    "games": matchup_games
                 }
-            }
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"Error getting matchup data between {team1_name} and {team2_name}: {str(e)}")
+                return {"error": f"Failed to get matchup data: {str(e)}"}
             
         except Exception as e:
-            logger.error(f"Error getting matchup data for {team1_name} vs {team2_name}: {str(e)}")
-            return {"error": f"Failed to get matchup data: {str(e)}"}
+            logger.error(f"Error in get_matchup_data: {str(e)}")
+            return {}
+            
+    def _transform_team_stats(self, stats) -> Dict[str, Any]:
+        """Transform team statistics into a consistent format"""
+        if not stats:
+            return {}
+            
+        return {
+            "games_played": stats.games if hasattr(stats, "games") else 0,
+            "points_per_game": stats.points if hasattr(stats, "points") else 0,
+            "rebounds_per_game": stats.totReb if hasattr(stats, "totReb") else 0,
+            "assists_per_game": stats.assists if hasattr(stats, "assists") else 0,
+            "field_goal_percentage": stats.fgp if hasattr(stats, "fgp") else "0",
+            "three_point_percentage": stats.tpp if hasattr(stats, "tpp") else "0",
+            "free_throw_percentage": stats.ftp if hasattr(stats, "ftp") else "0"
+        }
 
     @observe(name="get_league_data")
     async def get_league_data(self, client_metadata: ClientMetadata = None) -> Dict:
@@ -508,7 +591,10 @@ class BasketballService:
         """
         try:
             # Get current season
-            current_season = str(datetime.now().year)
+            current_season = await self.seasons.get_current_season(client_metadata)
+            if not current_season:
+                logger.error("Failed to get current season")
+                return {"error": "Failed to get current season"}
             
             # Get standings
             standings = await self.standings.get_standings(
@@ -596,6 +682,12 @@ class BasketballService:
                         return []
                     team_id = team_info["id"]
             
+            # Get current season
+            current_season = await self.seasons.get_current_season(client_metadata)
+            if not current_season:
+                logger.error("Failed to get current season")
+                return []
+            
             # Get games for yesterday, today, and tomorrow
             today = datetime.now(timezone.utc)
             dates = [
@@ -603,9 +695,6 @@ class BasketballService:
                 today.strftime("%Y-%m-%d"),
                 (today + timedelta(days=1)).strftime("%Y-%m-%d")
             ]
-            
-            # Get current season
-            current_season = self.date_handler.determine_season(today)
             
             # Get games for each date
             for date in dates:

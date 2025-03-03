@@ -2,20 +2,19 @@
 Utility functions for managing prompts with Langfuse.
 """
 
-from langfuse import Langfuse
 from typing import Dict, Any, List, Optional
 import logging
 from app.config import get_logger
-from app.config.langfuse_init import langfuse
+from app.utils.langfuse import get_langfuse_client
 
 logger = get_logger(__name__)
 
 class PromptManager:
     """Manages prompts and their interactions with Langfuse"""
     
-    def __init__(self, langfuse_client: Optional[Langfuse] = None):
+    def __init__(self, langfuse_client: Optional[Any] = None):
         """Initialize the PromptManager with a Langfuse client"""
-        self.langfuse = langfuse_client or langfuse
+        self.langfuse = langfuse_client or get_langfuse_client()
         
     def get_prompt(self, prompt_name: str) -> Dict[str, str]:
         """Get a prompt by name from Langfuse"""
@@ -35,6 +34,7 @@ def initialize_research_prompts():
     """Initialize or update the research chain prompts in Langfuse"""
     try:
         # Create query analysis prompt
+        langfuse = get_langfuse_client()
         langfuse.create_prompt(
             name="research-query-analysis",
             type="text",
@@ -122,6 +122,7 @@ def initialize_research_prompts():
 def get_query_analysis_prompt() -> str:
     """Get the current production version of the query analysis prompt"""
     try:
+        langfuse = get_langfuse_client()
         prompt = langfuse.get_prompt("research-query-analysis")
         return prompt
     except Exception as e:
@@ -131,6 +132,7 @@ def get_query_analysis_prompt() -> str:
 def get_response_generation_prompt() -> str:
     """Get the current production version of the response generation prompt"""
     try:
+        langfuse = get_langfuse_client()
         prompt = langfuse.get_prompt("research-response-generation")
         return prompt
     except Exception as e:
