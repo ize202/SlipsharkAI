@@ -357,16 +357,20 @@ class BasketballService:
                     unique_matchup_games.append(game)
             
             # Get team stats for comparison
-            team_tasks = [
-                self.get_team_data(team1_name, season_to_use),
-                self.get_team_data(team2_name, season_to_use)
-            ]
-            
-            team_results = await asyncio.gather(*team_tasks)
+            team1_stats = await self.teams.get_team_statistics(team1_id, season=str(season_to_use))
+            team2_stats = await self.teams.get_team_statistics(team2_id, season=str(season_to_use))
             
             return {
-                "team1": team_results[0],
-                "team2": team_results[1],
+                "team1": {
+                    "id": team1_id,
+                    "name": team1_name,
+                    "statistics": team1_stats.model_dump() if team1_stats else {}
+                },
+                "team2": {
+                    "id": team2_id,
+                    "name": team2_name,
+                    "statistics": team2_stats.model_dump() if team2_stats else {}
+                },
                 "matchup_games": unique_matchup_games,
                 "head_to_head_summary": {
                     "total_games": len(unique_matchup_games),
