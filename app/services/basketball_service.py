@@ -116,7 +116,9 @@ class BasketballService:
         self,
         team_name: str,
         client_metadata: ClientMetadata,
-        game_date: Optional[str] = None
+        game_date: Optional[str] = None,
+        include_games: bool = True,
+        include_stats: bool = True
     ) -> Dict[str, Any]:
         """
         Get team data including current season stats and standings
@@ -125,6 +127,8 @@ class BasketballService:
             team_name: Name of the team
             client_metadata: Client metadata for timezone/locale
             game_date: Optional date reference for game data
+            include_games: Whether to include recent games data
+            include_stats: Whether to include team statistics
             
         Returns:
             Dictionary containing team data
@@ -152,22 +156,23 @@ class BasketballService:
             
             try:
                 # Gather comprehensive team data in parallel
-                team_tasks = [
-                    # Team stats
-                    self.teams.get_team_statistics(team_id, season=str(season)),
-                    # Games - filter by date if provided
-                    self.games.list_games(
+                team_tasks = []
+                
+                # Add tasks based on what data is requested
+                if include_stats:
+                    team_tasks.append(self.teams.get_team_statistics(team_id, season=str(season)))
+                if include_games:
+                    team_tasks.append(self.games.list_games(
                         season=str(season),
                         team_id=team_id,
                         date=self.date_service.format_date_for_api(resolved_date) if resolved_date else None
-                    ),
-                    # Get standings
-                    self.standings.get_standings(
-                        league="standard",
-                        season=str(season),
-                        team_id=team_id
-                    )
-                ]
+                    ))
+                # Always get standings
+                team_tasks.append(self.standings.get_standings(
+                    league="standard",
+                    season=str(season),
+                    team_id=team_id
+                ))
                 
                 # Execute team tasks
                 team_results = await asyncio.gather(*team_tasks, return_exceptions=True)
@@ -181,15 +186,24 @@ class BasketballService:
                     }
                 
                 # Process team results
-                return {
+                result = {
                     "id": team.id,
                     "name": team.name,
                     "team_info": team.model_dump(),
-                    "statistics": team_results[0].model_dump() if not isinstance(team_results[0], Exception) else {"error": str(team_results[0])},
-                    "games": [g.model_dump() for g in team_results[1]] if not isinstance(team_results[1], Exception) else {"error": str(team_results[1])},
-                    "standings": [s.model_dump() for s in team_results[2]] if not isinstance(team_results[2], Exception) else {"error": str(team_results[2])},
                     "season_context": season_context
                 }
+                
+                # Add results based on what was requested
+                result_idx = 0
+                if include_stats:
+                    result["statistics"] = team_results[result_idx].model_dump() if not isinstance(team_results[result_idx], Exception) else {"error": str(team_results[result_idx])}
+                    result_idx += 1
+                if include_games:
+                    result["games"] = [g.model_dump() for g in team_results[result_idx]] if not isinstance(team_results[result_idx], Exception) else {"error": str(team_results[result_idx])}
+                    result_idx += 1
+                result["standings"] = [s.model_dump() for s in team_results[result_idx]] if not isinstance(team_results[result_idx], Exception) else {"error": str(team_results[result_idx])}
+                
+                return result
                 
             except Exception as e:
                 logger.error(f"Error getting data for team {team_name}: {str(e)}")

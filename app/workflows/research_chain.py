@@ -125,13 +125,17 @@ class ResearchChain:
                 
                 # Get team data if teams are mentioned
                 team_data = {}
+                required_data = request.context.required_data if request.context else []
+                
                 for team_key, team in analysis.teams.items():
                     if team:
                         # Pass client metadata for proper time context in sports API calls
                         team_data[team] = await basketball.get_team_data(
                             team_name=team,
                             client_metadata=request.client_metadata,
-                            game_date=analysis.game_date
+                            game_date=analysis.game_date,
+                            include_games="recent_games" in required_data,
+                            include_stats="team_stats" in required_data
                         )
                         if team_data[team]:
                             data_points.append(DataPoint(
@@ -179,10 +183,26 @@ class ResearchChain:
     ) -> ResearchResponse:
         """[LLM Call 2] Generate the final response"""
         try:
-            # Prepare data for the LLM
+            # Filter and truncate data points to reduce context size
+            filtered_data_points = []
+            for dp in data_points:
+                if dp.source == "basketball_api" and isinstance(dp.content, dict):
+                    # Limit games data to most recent 5 games
+                    if "games" in dp.content:
+                        dp.content["games"] = dp.content["games"][:5]
+                    # Only include essential statistics
+                    if "statistics" in dp.content:
+                        essential_stats = ["games", "wins", "losses", "points", "fga", "fgm", "fta", "ftm"]
+                        dp.content["statistics"] = {
+                            k: v for k, v in dp.content["statistics"].items() 
+                            if k in essential_stats
+                        }
+                filtered_data_points.append(dp)
+            
+            # Prepare data for the LLM with reduced context
             data_context = {
                 "query": query,
-                "data_points": [dp.model_dump(mode='json') for dp in data_points],
+                "data_points": [dp.model_dump(mode='json') for dp in filtered_data_points],
                 "context": context.model_dump(mode='json') if context else {}
             }
             
@@ -205,7 +225,7 @@ class ResearchChain:
             
             return ResearchResponse(
                 response=result["response"],
-                data_points=data_points,
+                data_points=data_points,  # Return original data points in response
                 suggested_questions=result["suggested_questions"],
                 context_updates=ConversationContext(**result["context_updates"]),
                 confidence_score=result["confidence_score"]

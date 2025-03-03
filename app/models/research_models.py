@@ -40,6 +40,7 @@ class ConversationContext(BaseModel):
     game_date: Optional[str] = None  # Must be string, not datetime
     bet_type: Optional[str] = None
     last_query: Optional[str] = None
+    required_data: List[str] = Field(default_factory=list)
 
     class Config:
         json_encoders = {

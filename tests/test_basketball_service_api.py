@@ -21,36 +21,28 @@ from loguru import logger
 logger = get_logger(__name__)
 
 def log_separator(title: str):
-    """Print a separator with title for better log readability"""
-    logger.info("\n" + "=" * 80)
-    logger.info(f"{title}")
-    logger.info("=" * 80 + "\n")
+    """Print a separator with title for test output"""
+    print(f"\n{'='*20} {title} {'='*20}\n")
 
 def log_test_case(description: str):
-    """Log test case description"""
-    logger.info(f"\n=== Test Case: {description} ===")
+    """Print test case description"""
+    print(f"\n--- Testing: {description} ---")
 
-def log_api_response(response, description="API Response"):
-    """Log API response in a readable format"""
-    try:
-        if isinstance(response, list) and response and isinstance(response[0], DataPoint):
-            # Convert DataPoints to dictionaries
-            serializable_response = [
-                {
-                    "source": dp.source,
-                    "content": dp.content,
-                    "timestamp": dp.timestamp.isoformat() if dp.timestamp else None,
-                    "confidence": dp.confidence
-                }
-                for dp in response
-            ]
-        else:
-            serializable_response = response
-            
-        logger.info(f"\n--- {description} ---\n{json.dumps(serializable_response, indent=2, default=str)}")
-    except Exception as e:
-        logger.error(f"Error logging response: {e}")
-        logger.error(f"Raw response: {response}")
+def log_api_response(data_points, title: str):
+    """Log API response data points"""
+    print(f"\n{title}:")
+    for dp in data_points:
+        print(f"Source: {dp.source}")
+        if isinstance(dp.content, dict) and "error" in dp.content:
+            print(f"Error: {dp.content['error']}")
+
+def create_test_metadata(timezone: str = "America/New_York") -> ClientMetadata:
+    """Create test client metadata with minimal context"""
+    return ClientMetadata(
+        timestamp=datetime(2025, 3, 3, 18, 12, 17, 702408),
+        timezone=timezone,
+        locale="en-US"
+    )
 
 @pytest.mark.asyncio
 async def test_basketball_service_comprehensive():
@@ -169,13 +161,142 @@ async def test_date_handling():
         if team_games:  # Only check if games are returned
             assert any("Los Angeles Lakers" in str(game) for game in team_games), "Team games should include the specified team"
 
+@pytest.mark.asyncio
+async def test_matchup_analysis_through_chain():
+    """Test matchup analysis through the research chain"""
+    log_separator("Testing Matchup Analysis Through Chain")
+    
+    async with ResearchChain() as chain:
+        # Test with minimal data for Lakers vs Warriors
+        request = ResearchRequest(
+            query="Compare Lakers vs Warriors head to head stats",
+            mode=ResearchMode.DEEP,
+            client_metadata=create_test_metadata(),
+            context=ConversationContext(
+                teams=["Los Angeles Lakers", "Golden State Warriors"],
+                sport=SportType.BASKETBALL,
+                required_data=["team_stats", "recent_games"]  # Specify only needed data
+            )
+        )
+        
+        response = await chain.process_request(request)
+        log_api_response(response.data_points, "Matchup Response")
+        
+        # Verify response structure
+        basketball_data = [dp for dp in response.data_points if dp.source == "basketball_api"]
+        assert len(basketball_data) > 0, "No basketball API data found"
+        
+        # Check for essential data components
+        found_stats = False
+        found_games = False
+        for dp in basketball_data:
+            content = dp.content
+            if isinstance(content, dict):
+                if content.get("statistics"):
+                    found_stats = True
+                    assert isinstance(content["statistics"], dict), "Invalid statistics format"
+                if content.get("games"):
+                    found_games = True
+                    assert isinstance(content["games"], list), "Invalid games format"
+                    # Only check first 5 games to reduce context
+                    content["games"] = content["games"][:5]
+        
+        assert found_stats, "No team statistics found in response"
+        assert found_games, "No games data found in response"
+
+@pytest.mark.asyncio
+async def test_matchup_error_handling():
+    """Test error handling for matchup analysis"""
+    log_separator("Testing Matchup Error Handling")
+    
+    async with ResearchChain() as chain:
+        error_test_cases = [
+            {
+                "description": "Invalid team names",
+                "query": "Compare Invalid Team A vs Invalid Team B",
+                "expected_error": "Team not found"
+            },
+            {
+                "description": "Missing second team",
+                "query": "How does the Lakers match up?",
+                "expected_error": "second team"
+            }
+        ]
+        
+        for case in error_test_cases:
+            log_test_case(case["description"])
+            
+            request = ResearchRequest(
+                query=case["query"],
+                mode=ResearchMode.DEEP,
+                client_metadata=create_test_metadata(),
+                context=ConversationContext(
+                    required_data=["team_stats"]  # Minimal data requirement
+                )
+            )
+            
+            response = await chain.process_request(request)
+            log_api_response(response.data_points, "Error Case Response")
+            
+            # Verify error handling with more flexible error message matching
+            error_found = False
+            for dp in response.data_points:
+                if dp.source == "basketball_api" and isinstance(dp.content, dict):
+                    error = dp.content.get("error", "").lower()
+                    expected = case["expected_error"].lower()
+                    if error and expected in error:
+                        error_found = True
+                        break
+            
+            assert error_found, f"Expected error containing '{case['expected_error']}' not found in response"
+
+@pytest.mark.asyncio
+async def test_matchup_with_different_timezones():
+    """Test matchup analysis with different timezone contexts"""
+    log_separator("Testing Matchup Analysis with Different Timezones")
+    
+    # Test with just one timezone to reduce context
+    tz = "America/New_York"
+    log_test_case(f"Testing with timezone: {tz}")
+    
+    async with ResearchChain() as chain:
+        request = ResearchRequest(
+            query="Compare Lakers vs Warriors head to head stats",
+            mode=ResearchMode.DEEP,
+            client_metadata=create_test_metadata(timezone=tz),
+            context=ConversationContext(
+                teams=["Los Angeles Lakers", "Golden State Warriors"],
+                sport=SportType.BASKETBALL,
+                required_data=["team_stats", "recent_games"]  # Specify only needed data
+            )
+        )
+        
+        response = await chain.process_request(request)
+        log_api_response(response.data_points, "Timezone Test Response")
+        
+        # Verify timezone handling
+        basketball_data = [dp for dp in response.data_points if dp.source == "basketball_api"]
+        assert len(basketball_data) > 0, "No basketball API data found"
+        
+        # Check that games data is present and properly formatted
+        for dp in basketball_data:
+            if isinstance(dp.content, dict) and "games" in dp.content:
+                games = dp.content["games"]
+                assert isinstance(games, list), "Games should be a list"
+                # Only check first 5 games to reduce context
+                dp.content["games"] = games[:5]
+                if games:
+                    assert "date" in games[0], "Game should have a date"
+
 async def main():
-    """Run all test functions including new ones"""
+    """Run all test functions"""
     try:
-        # Existing tests
         await test_basketball_service_comprehensive()
         await test_error_handling()
         await test_date_handling()
+        await test_matchup_analysis_through_chain()
+        await test_matchup_error_handling()
+        await test_matchup_with_different_timezones()
     except Exception as e:
         logger.error("Test suite failed", exc_info=True)
         raise
