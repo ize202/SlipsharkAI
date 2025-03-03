@@ -9,31 +9,39 @@ A sophisticated AI-powered research assistant for sports betting analysis, lever
 ```mermaid
 graph TD
     A[User Query] --> B[LLM Call 1: Query Analyzer]
-    B --> C{Mode Decision}
-    C -->|Quick Research| D1[Web Search Only]
-    C -->|Deep Research| D2[Web Search + Sports API + User Data]
-    D1 --> E[LLM Call 2: Analysis]
+    B --> C{Required Data Check}
+    C -->|Basic Query| D1[Web Search]
+    C -->|Sports Data Required| D2[Web Search + Sports API]
+    D1 --> E[LLM Call 2: Response Generation]
     D2 --> E
-    E --> F[LLM Call 3: Response Generation]
-    F --> G[Return Response to User]
+    E -->|Quick Mode| F1[Concise Analysis]
+    E -->|Deep Mode| F2[Comprehensive Analysis]
+    F1 --> G[Return Response to User]
+    F2 --> G
 ```
 
-### Mode Selection Logic
+### Mode Selection & Data Gathering
 
-The system automatically determines the appropriate research mode based on query complexity:
+The system determines what data to gather based on the query requirements, while the mode controls the depth of analysis:
+
+#### Data Gathering Logic
+- Web search data is always fetched first
+- Sports API data is fetched when required, regardless of mode
+- Data requirements are determined by query analysis
+- Parallel data fetching for efficiency
 
 #### Quick Research Mode
-- Simple queries (e.g., "What's the spread for Lakers game tonight?")
-- Current basic information requests
-- Single data point lookups
-- Data Sources: Web Search
+- Concise, focused analysis
+- Direct answers to queries
+- Key insights highlighted
+- Minimal contextual information
 
 #### Deep Research Mode
-- Complex queries requiring multiple data points
-- Historical analysis requests
-- Queries mentioning trends/stats/standings
-- Multiple team/player comparisons
-- Data Sources: Web Search + Sports API + User History
+- Comprehensive analysis
+- Multiple data points considered
+- Historical context integration
+- Detailed insights and correlations
+- Risk assessment and trends
 
 ### Core Components
 
@@ -41,25 +49,19 @@ The system automatically determines the appropriate research mode based on query
    - Intent detection
    - Entity extraction
    - Mode determination
-   - Data requirement analysis
+   - Required data identification
 
 2. **Data Gathering**
    - Web search via Perplexity AI
-   - Sports API integration
-   - User history from database
+   - Sports API integration (when required)
    - Parallel data fetching
+   - Data validation and transformation
 
-3. **Analysis (LLM Call 2)**
+3. **Response Generation (LLM Call 2)**
+   - Mode-based analysis depth
    - Data synthesis
-   - Pattern recognition
-   - Risk assessment
-   - Confidence scoring
-
-4. **Response Generation (LLM Call 3)**
    - Natural language formatting
-   - Insight prioritization
-   - Citation inclusion
-   - Recommendation generation
+   - Confidence scoring
 
 ## Technical Stack
 
