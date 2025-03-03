@@ -1,7 +1,11 @@
 from datetime import datetime, timezone, timedelta
 import asyncio
 from typing import List, Dict, Any, Optional
-from app.services.api_sports_basketball import NBAService, NBAApiConfig, NBAApiClient, NBATeamService, NBAGameService, NBAPlayerService, NBAStandingService, NBASeasonService, NBALeagueService
+from app.services.api_sports_basketball import (
+    NBAService, NBAApiConfig, NBAApiClient, NBATeamService, 
+    NBAGameService, NBAPlayerService, NBAStandingService, 
+    NBASeasonService, NBALeagueService, NBA_TEAM_IDS
+)
 from app.services.date_resolution_service import DateResolutionService
 from app.services.basketball_date_handler import BasketballDateHandler
 from app.models.research_models import ClientMetadata
@@ -31,8 +35,7 @@ class BasketballService:
         self.seasons = NBASeasonService(self.client)
         self.leagues = NBALeagueService(self.client)
         
-        self._team_cache = {}  # Cache team IDs
-        self._nba_service = None
+        self._nba_service = None  # Only keep NBA service initialization
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -86,12 +89,22 @@ class BasketballService:
 
     @observe(name="find_team")
     async def find_team(self, team_name: str, season: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Find a team by name or nickname"""
+        """Find a team by name, nickname, or ID mapping"""
         if not team_name:
             return None
-            
+        
         try:
-            # Get teams data
+            # First check static ID mapping
+            team_id = NBA_TEAM_IDS.get(team_name.lower())
+            if team_id:
+                logger.info(f"Found team ID {team_id} from static mapping for {team_name}")
+                # Get teams data to get full team info
+                teams = await self.teams.list_teams()
+                team = next((t for t in teams if t.id == team_id), None)
+                if team:
+                    return team.model_dump()
+            
+            # Fallback to API lookup if not found in mapping
             teams = await self.teams.list_teams()
             
             # Try exact match on name
@@ -134,23 +147,22 @@ class BasketballService:
             Dictionary containing team data
         """
         try:
-            # Resolve and validate the game date
-            resolved_date = None
-            if game_date:
-                resolved_date = self._resolve_game_date(game_date, client_metadata)
-                if game_date and not resolved_date:
-                    logger.warning(f"Invalid game date reference: {game_date}")
+            # First try to get team ID from static mapping
+            team_id = NBA_TEAM_IDS.get(team_name.lower())
+            team = None
             
-            # Determine season based on the game date or current date
-            season = self.date_handler.determine_season(
-                resolved_date or datetime.now(timezone.utc)
-            )
+            if team_id:
+                logger.info(f"Found team ID {team_id} from static mapping for {team_name}")
+                # Get teams data to get full team info
+                teams = await self.teams.list_teams()
+                team = next((t for t in teams if t.id == team_id), None)
             
-            # Get team data
-            teams = await self.teams.list_teams()
-            team = next((t for t in teams if t.name.lower() == team_name.lower()), None)
+            # Fallback to API lookup if not found in mapping
             if not team:
-                return {"error": f"Team not found: {team_name}"}
+                teams = await self.teams.list_teams()
+                team = next((t for t in teams if t.name.lower() == team_name.lower()), None)
+                if not team:
+                    return {"error": f"Team not found: {team_name}"}
             
             team_id = team.id
             
@@ -302,17 +314,19 @@ class BasketballService:
         logger.info(f"Getting player data for {player_name}, team: {team_name}, season: {current_season}")
         
         try:
-            # Always try to find team first
+            # Get team ID from static mapping first if team name provided
             team_id = None
             if team_name:
-                team_info = await self.find_team(team_name, current_season)
-                logger.debug(f"Team lookup result for {team_name}: {team_info}")
-                if team_info:
-                    team_id = team_info["id"]
-                    logger.info(f"Found team ID {team_id} for {team_name}")
-                else:
-                    logger.error(f"Could not find team ID for team name: {team_name}")
-                    return {"error": f"Could not find team: {team_name}"}
+                team_id = NBA_TEAM_IDS.get(team_name.lower())
+                if not team_id:
+                    # Fallback to API lookup
+                    team_info = await self.find_team(team_name, current_season)
+                    logger.debug(f"Team lookup result for {team_name}: {team_info}")
+                    if team_info:
+                        team_id = team_info["id"]
+                    else:
+                        logger.error(f"Could not find team ID for team name: {team_name}")
+                        return {"error": f"Could not find team: {team_name}"}
             
             # Split player name into first and last name
             name_parts = player_name.strip().split(" ", 1)
@@ -407,15 +421,20 @@ class BasketballService:
         season_to_use = season or self.date_handler.determine_season(datetime.now())
         
         try:
-            # Find both teams
-            team1_info = await self.find_team(team1_name, season_to_use)
-            team2_info = await self.find_team(team2_name, season_to_use)
+            # Get team IDs directly from mapping
+            team1_id = NBA_TEAM_IDS.get(team1_name.lower())
+            team2_id = NBA_TEAM_IDS.get(team2_name.lower())
             
-            if not team1_info or not team2_info:
-                return {"error": f"One or both teams not found: {team1_name} vs {team2_name}"}
+            if not team1_id or not team2_id:
+                # Fallback to API lookup only if not found in mapping
+                team1_info = await self.find_team(team1_name, season_to_use)
+                team2_info = await self.find_team(team2_name, season_to_use)
                 
-            team1_id = team1_info["id"]
-            team2_id = team2_info["id"]
+                if not team1_info or not team2_info:
+                    return {"error": f"One or both teams not found: {team1_name} vs {team2_name}"}
+                    
+                team1_id = team1_info["id"]
+                team2_id = team2_info["id"]
             
             # Get games for both teams
             team1_games = await nba.games.list_games(
@@ -565,13 +584,17 @@ class BasketballService:
         team_id = None
         
         try:
-            # If team name provided, get team ID first
-            if isinstance(team_name, str):  # Only process if it's actually a team name string
-                team_info = await self.find_team(team_name)
-                if not team_info:
-                    logger.warning(f"Team not found: {team_name}")
-                    return []
-                team_id = team_info["id"]
+            # If team name provided, get team ID from mapping first
+            if isinstance(team_name, str):
+                team_id = NBA_TEAM_IDS.get(team_name.lower())
+                if not team_id:
+                    logger.warning(f"Team not found in mapping: {team_name}")
+                    # Fallback to API lookup
+                    team_info = await self.find_team(team_name)
+                    if not team_info:
+                        logger.warning(f"Team not found via API: {team_name}")
+                        return []
+                    team_id = team_info["id"]
             
             # Get games for yesterday, today, and tomorrow
             today = datetime.now(timezone.utc)
@@ -617,14 +640,9 @@ class BasketballService:
             List of games between the two teams
         """
         try:
-            # Get team IDs
-            if team1 not in self._team_cache or team2 not in self._team_cache:
-                teams = await self.client.list_teams()
-                for team in teams:
-                    self._team_cache[team["name"]] = team["id"]
-            
-            team1_id = self._team_cache.get(team1)
-            team2_id = self._team_cache.get(team2)
+            # Get team IDs directly from mapping
+            team1_id = NBA_TEAM_IDS.get(team1.lower())
+            team2_id = NBA_TEAM_IDS.get(team2.lower())
             
             if not team1_id or not team2_id:
                 logger.error(f"Teams not found: {team1} and/or {team2}")

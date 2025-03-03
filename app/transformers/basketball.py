@@ -9,11 +9,16 @@ from app.transformers.base import (
 )
 from app.config import get_logger
 from app.utils.cache import redis_cache
+from app.services.api_sports_basketball import NBA_TEAM_IDS
 
 logger = get_logger(__name__)
 
 class BasketballTransformer(SportDataTransformer):
     """Transformer for basketball data"""
+    
+    def _validate_team_id(self, team_id: int) -> bool:
+        """Validate that a team ID exists in our static mapping"""
+        return team_id in set(NBA_TEAM_IDS.values())
     
     @redis_cache(ttl=3600, prefix="basketball_team")
     async def transform_team_data(
@@ -25,6 +30,11 @@ class BasketballTransformer(SportDataTransformer):
         try:
             if not raw_data:
                 return {"error": "No team data provided"}
+                
+            # Validate team ID
+            team_id = raw_data.get("id")
+            if team_id and not self._validate_team_id(team_id):
+                logger.warning(f"Unknown team ID: {team_id}")
                 
             # Initialize result with team info
             result = {
@@ -100,6 +110,14 @@ class BasketballTransformer(SportDataTransformer):
             away_team = game.get("teams", {}).get("away", {})
             scores = game.get("scores", {})
             
+            # Validate team IDs
+            home_id = home_team.get("id")
+            away_id = away_team.get("id")
+            if home_id and not self._validate_team_id(home_id):
+                logger.warning(f"Unknown home team ID: {home_id}")
+            if away_id and not self._validate_team_id(away_id):
+                logger.warning(f"Unknown away team ID: {away_id}")
+                
             if not home_team or not away_team:
                 raise ValueError("Missing team information in game data")
                 

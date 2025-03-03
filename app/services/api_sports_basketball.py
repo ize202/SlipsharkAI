@@ -17,6 +17,79 @@ from langfuse.decorators import observe
 from ..utils.cache import redis_cache
 import hashlib
 
+# NBA Team IDs from API Sports dashboard
+NBA_TEAM_IDS = {
+    # Eastern Conference
+    "boston celtics": 2,
+    "brooklyn nets": 4,
+    "new york knicks": 24,
+    "philadelphia 76ers": 27,
+    "toronto raptors": 38,
+    "chicago bulls": 6,
+    "cleveland cavaliers": 7,
+    "detroit pistons": 10,
+    "indiana pacers": 15,
+    "milwaukee bucks": 21,
+    "atlanta hawks": 1,
+    "charlotte hornets": 5,
+    "miami heat": 20,
+    "orlando magic": 26,
+    "washington wizards": 41,
+    
+    # Western Conference
+    "denver nuggets": 9,
+    "minnesota timberwolves": 22,
+    "oklahoma city thunder": 25,
+    "portland trail blazers": 29,
+    "utah jazz": 40,
+    "golden state warriors": 11,
+    "la clippers": 16,
+    "los angeles clippers": 16,
+    "los angeles lakers": 17,
+    "la lakers": 17,
+    "phoenix suns": 28,
+    "sacramento kings": 30,
+    "dallas mavericks": 8,
+    "houston rockets": 14,
+    "memphis grizzlies": 19,
+    "new orleans pelicans": 23,
+    "san antonio spurs": 31,
+    
+    # Common Aliases
+    "sixers": 27,
+    "lakers": 17,
+    "clippers": 16,
+    "warriors": 11,
+    "celtics": 2,
+    "nets": 3,
+    "knicks": 24,
+    "raptors": 38,
+    "bulls": 6,
+    "cavs": 7,
+    "pistons": 10,
+    "pacers": 15,
+    "bucks": 21,
+    "hawks": 1,
+    "hornets": 5,
+    "heat": 20,
+    "magic": 26,
+    "wizards": 41,
+    "nuggets": 9,
+    "wolves": 22,
+    "timberwolves": 22,
+    "thunder": 25,
+    "blazers": 29,
+    "jazz": 40,
+    "suns": 28,
+    "kings": 30,
+    "mavs": 8,
+    "mavericks": 8,
+    "rockets": 14,
+    "grizzlies": 19,
+    "pelicans": 23,
+    "spurs": 31
+}
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -453,7 +526,7 @@ class NBATeamService:
     
     def __init__(self, client: NBAApiClient):
         self.client = client
-        self._team_cache: Dict[str, Team] = {}
+        self._teams_by_id: Dict[int, Team] = {}  # Cache teams by ID
         
     @redis_cache(ttl=86400, prefix="nba_teams")  # 24 hour cache for teams
     async def list_teams(
@@ -464,6 +537,18 @@ class NBATeamService:
         search: Optional[str] = None
     ) -> List[Team]:
         """Get list of NBA teams"""
+        # If we have a search term and it's in our static mapping, optimize the lookup
+        if search and len(search) >= 3:
+            team_id = NBA_TEAM_IDS.get(search.lower())
+            if team_id:
+                # Check if we have this team cached
+                if team_id in self._teams_by_id:
+                    return [self._teams_by_id[team_id]]
+                # Otherwise fetch all teams but return only the one we want
+                teams = await self._fetch_teams({"league": league})
+                return [t for t in teams if t.id == team_id]
+        
+        # Standard API lookup for other cases
         params = {"league": league}
         if conference:
             params["conference"] = conference
@@ -472,8 +557,18 @@ class NBATeamService:
         if search and len(search) >= 3:
             params["search"] = search
             
+        return await self._fetch_teams(params)
+    
+    async def _fetch_teams(self, params: Dict[str, Any]) -> List[Team]:
+        """Fetch teams from API and update cache"""
         data = await self.client._make_request("teams", params)
-        return [Team(**team) for team in data.get("response", [])]
+        teams = [Team(**team) for team in data.get("response", [])]
+        
+        # Update our ID cache
+        for team in teams:
+            self._teams_by_id[team.id] = team
+            
+        return teams
         
     @redis_cache(ttl=3600, prefix="nba_team_stats")  # 1 hour cache for team stats
     async def get_team_statistics(
@@ -482,6 +577,10 @@ class NBATeamService:
         season: str = "2023"
     ) -> TeamStatistics:
         """Get team statistics"""
+        # Validate team_id is valid
+        if team_id not in set(NBA_TEAM_IDS.values()):
+            raise NBAApiError(f"Invalid team ID: {team_id}")
+            
         data = await self.client._make_request(
             "teams/statistics",
             {"id": team_id, "season": season}
