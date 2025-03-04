@@ -387,12 +387,6 @@ class BasketballService:
                 return {"error": f"Player not found: {player_name}"}
             
             try:
-                # Get player statistics for current season
-                stats = await self.players.get_player_statistics(
-                    player_id=player.id,
-                    season=str(current_season)
-                )
-                
                 # Add season phase if we have a game date
                 season_context = {}
                 if resolved_date:
@@ -409,15 +403,76 @@ class BasketballService:
                         "id": player_team.id,
                         "name": player_team.name
                     },
-                    "season_stats": self._calculate_season_stats(stats) if stats else {},
+                    "season_stats": {},
                     "season_context": season_context
                 }
+
+                # Get player statistics for current season
+                stats = await self.players.get_player_statistics(
+                    player_id=player.id,
+                    season=str(current_season)
+                )
+                
+                # Initialize default season stats
+                player_data["season_stats"] = {
+                    "games_played": 0,
+                    "points_per_game": 0.0,
+                    "rebounds_per_game": 0.0,
+                    "assists_per_game": 0.0,
+                    "field_goal_percentage": "0.0",
+                    "three_point_percentage": "0.0",
+                    "free_throw_percentage": "0.0"
+                }
+                
+                # Calculate season stats if we have statistics
+                if stats and isinstance(stats, list) and len(stats) > 0:
+                    # Calculate averages across all games
+                    total_games = len(stats)
+                    total_points = sum(game.points for game in stats if hasattr(game, "points"))
+                    total_rebounds = sum(game.totReb for game in stats if hasattr(game, "totReb"))
+                    total_assists = sum(game.assists for game in stats if hasattr(game, "assists"))
+                    total_fgm = sum(game.fgm for game in stats if hasattr(game, "fgm"))
+                    total_fga = sum(game.fga for game in stats if hasattr(game, "fga"))
+                    total_ftm = sum(game.ftm for game in stats if hasattr(game, "ftm"))
+                    total_fta = sum(game.fta for game in stats if hasattr(game, "fta"))
+                    total_tpm = sum(game.tpm for game in stats if hasattr(game, "tpm"))
+                    total_tpa = sum(game.tpa for game in stats if hasattr(game, "tpa"))
+                    
+                    player_data["season_stats"] = {
+                        "games_played": total_games,
+                        "points_per_game": round(total_points / total_games, 1) if total_games > 0 else 0,
+                        "rebounds_per_game": round(total_rebounds / total_games, 1) if total_games > 0 else 0,
+                        "assists_per_game": round(total_assists / total_games, 1) if total_games > 0 else 0,
+                        "field_goal_percentage": str(round(total_fgm / total_fga * 100, 1)) if total_fga > 0 else "0.0",
+                        "three_point_percentage": str(round(total_tpm / total_tpa * 100, 1)) if total_tpa > 0 else "0.0",
+                        "free_throw_percentage": str(round(total_ftm / total_fta * 100, 1)) if total_fta > 0 else "0.0"
+                    }
+                else:
+                    logger.warning(f"No statistics found for player {player_name} in season {current_season}")
                 
                 return player_data
                 
             except Exception as e:
                 logger.error(f"Error getting stats for player {player_name}: {str(e)}")
-                return {"error": f"Failed to get stats for player {player_name}: {str(e)}"}
+                return {
+                    "id": player.id,
+                    "name": f"{player.firstname} {player.lastname}",
+                    "team": {
+                        "id": player_team.id,
+                        "name": player_team.name
+                    },
+                    "season_stats": {
+                        "games_played": 0,
+                        "points_per_game": 0.0,
+                        "rebounds_per_game": 0.0,
+                        "assists_per_game": 0.0,
+                        "field_goal_percentage": "0.0",
+                        "three_point_percentage": "0.0",
+                        "free_throw_percentage": "0.0"
+                    },
+                    "season_context": season_context,
+                    "error": f"Failed to get stats: {str(e)}"
+                }
             
         except Exception as e:
             logger.error(f"Error getting player data for {player_name}: {str(e)}")
