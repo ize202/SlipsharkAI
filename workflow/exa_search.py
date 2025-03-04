@@ -114,7 +114,7 @@ def process_query(query: str):
             
             # Step 6: Get final response from GPT
             final_completion = openai.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=messages,
             )
             return final_completion.choices[0].message.content
