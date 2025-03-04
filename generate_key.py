@@ -12,10 +12,6 @@ def generate_api_key(prefix="sk_v1"):
 if __name__ == "__main__":
     api_key = generate_api_key()
     print("\nGenerated API Key:")
-    print("------------------")
     print(api_key)
-    print("\nAdd this to your .env file as:")
-    print("------------------")
-    print(f"API_KEY={api_key}")
-    print("\nNOTE: This new key format (sk_v1_) will invalidate any old keys.")
-    print("------------------\n") 
+    print("\nAdd this key to your .env file and Railway environment variables:")
+    print("API_KEY=" + api_key + "\n")
