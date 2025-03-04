@@ -3,6 +3,7 @@ ipykernel
 python-dotenv
 openai>=1.0.0
 pydantic
+pydantic-settings
 fastapi
 langfuse
 httpx>=0.25.0
