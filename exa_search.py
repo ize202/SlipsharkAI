@@ -1,8 +1,6 @@
 import json
 import os
 import sys
-from typing import Dict, Any
-
 from dotenv import load_dotenv
 from exa_py import Exa
 from openai import OpenAI
@@ -39,8 +37,7 @@ TOOLS = [
     }
 ]
 
-def exa_search(query: str) -> Dict[str, Any]:
-    """Perform a web search using Exa"""
+def exa_search(query: str):
     return exa.search_and_contents(
         query=query,
         type='auto',
@@ -48,13 +45,26 @@ def exa_search(query: str) -> Dict[str, Any]:
         num_results=5
     )
 
-def process_query(query: str) -> str:
-    """Process a single query and return the response"""
+def process_tool_calls(tool_calls, messages):
+    for tool_call in tool_calls:
+        function_name = tool_call.function.name
+        function_args = json.loads(tool_call.function.arguments)
+        
+        if function_name == "exa_search":
+            search_results = exa_search(**function_args)
+            messages.append({
+                "role": "tool",
+                "content": str(search_results),
+                "tool_call_id": tool_call.id,
+            })
+    
+    return messages
+
+def process_query(query: str):
     messages = [SYSTEM_MESSAGE]
     messages.append({"role": "user", "content": query})
     
     try:
-        # First completion to get search parameters
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=messages,
@@ -67,24 +77,12 @@ def process_query(query: str) -> str:
         
         if tool_calls:
             messages.append(message)
-            
-            # Process search
-            for tool_call in tool_calls:
-                function_args = json.loads(tool_call.function.arguments)
-                search_results = exa_search(**function_args)
-                messages.append({
-                    "role": "tool",
-                    "content": str(search_results),
-                    "tool_call_id": tool_call.id,
-                })
-            
-            # Add the prompt to process search results
+            messages = process_tool_calls(tool_calls, messages)
             messages.append({
                 "role": "user",
                 "content": "Answer my previous query based on the search results."
             })
             
-            # Get final answer
             final_completion = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
