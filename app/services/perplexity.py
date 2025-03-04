@@ -69,9 +69,6 @@ class PerplexityService:
             system_prompt = """You are a professional sports betting analyst.                                                
                                     Format your responses in this structure:
                                     SUMMARY: [A clear, data-driven conclusion]
-                                    KEY POINTS:
-                                    - [Specific fact with numbers where relevant]
-                                    - [Another specific fact with numbers where relevant]
 
                                     Tone and Style Rules:
                                     1. Be precise and factual
