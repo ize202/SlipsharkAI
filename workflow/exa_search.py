@@ -5,8 +5,7 @@ from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 from exa_py import Exa
-from langfuse.decorators import observe
-from langfuse.openai import openai
+from langfuse.openai import OpenAI
 from openai import OpenAI
 
 #--------------------------------
@@ -17,11 +16,6 @@ load_dotenv()
 # Initialize API clients
 openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 exa = Exa(api_key=os.getenv("EXA_API_KEY"))
-langfuse = Langfuse(
-    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-    host=os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
-)
 
 #--------------------------------
 # Configuration
@@ -86,7 +80,6 @@ def process_tool_calls(tool_calls, messages):
     
     return messages
 
-@observe(name="sports_research_query")
 def process_query(query: str):
     """Main query processing pipeline"""
     # Step 1: Initialize conversation with system message
