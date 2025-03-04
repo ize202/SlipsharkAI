@@ -11,7 +11,7 @@ load_dotenv()
 url = "https://api.perplexity.ai/chat/completions"
 
 payload = {
-    "model": "sonar",
+    "model": "sonar-pro",
     "messages": [
         {
             "role": "system",
@@ -19,7 +19,7 @@ payload = {
         },
         {
             "role": "user",
-            "content": "How many stars are there in our galaxy?"
+            "content": "Nba games today"
         }
     ],
 }
