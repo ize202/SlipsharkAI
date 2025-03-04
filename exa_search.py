@@ -5,18 +5,25 @@ from dotenv import load_dotenv
 from exa_py import Exa
 from openai import OpenAI
 
-# Load environment variables
+#--------------------------------
+# Environment Setup
+#--------------------------------
 load_dotenv()
 
-# Initialize clients
+# Initialize API clients
 openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 exa = Exa(api_key=os.getenv("EXA_API_KEY"))
 
+#--------------------------------
+# Configuration
+#--------------------------------
+# Define the AI's role and behavior
 SYSTEM_MESSAGE = {
     "role": "system",
     "content": "You are a sports research assistant. Provide accurate and up-to-date sports information using the search tool."
 }
 
+# Define the search tool that GPT can use
 TOOLS = [
     {
         "type": "function",
@@ -37,7 +44,11 @@ TOOLS = [
     }
 ]
 
+#--------------------------------
+# Core Functions
+#--------------------------------
 def exa_search(query: str):
+    """Execute web search using Exa API"""
     return exa.search_and_contents(
         query=query,
         type='auto',
@@ -46,6 +57,7 @@ def exa_search(query: str):
     )
 
 def process_tool_calls(tool_calls, messages):
+    """Process GPT's tool calls and execute searches"""
     for tool_call in tool_calls:
         function_name = tool_call.function.name
         function_args = json.loads(tool_call.function.arguments)
@@ -61,10 +73,13 @@ def process_tool_calls(tool_calls, messages):
     return messages
 
 def process_query(query: str):
+    """Main query processing pipeline"""
+    # Step 1: Initialize conversation with system message and user query
     messages = [SYSTEM_MESSAGE]
     messages.append({"role": "user", "content": query})
     
     try:
+        # Step 2: Ask GPT to analyze query and decide on search strategy
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=messages,
@@ -76,24 +91,32 @@ def process_query(query: str):
         tool_calls = message.tool_calls
         
         if tool_calls:
+            # Step 3: If GPT wants to search, process the search requests
             messages.append(message)
             messages = process_tool_calls(tool_calls, messages)
+            
+            # Step 4: Ask GPT to analyze search results and answer the query
             messages.append({
                 "role": "user",
                 "content": "Answer my previous query based on the search results."
             })
             
+            # Step 5: Get final response from GPT
             final_completion = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
             )
             return final_completion.choices[0].message.content
         
+        # If no search needed, return direct GPT response
         return message.content
             
     except Exception as e:
         return f"Error: {str(e)}"
 
+#--------------------------------
+# Test Runner
+#--------------------------------
 if __name__ == "__main__":
     # Simple test query
     test_query = "What NBA games are scheduled for tonight?"
