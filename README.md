@@ -10,6 +10,22 @@ This MVP demonstrates a basic implementation of a sports research assistant that
 - Provide accurate, sourced responses about games, scores, stats, and news
 - Access via REST API endpoint
 
+## Deployment
+
+### Railway Deployment
+
+1. Push your code to a GitHub repository
+2. Connect your repository to Railway
+3. Add environment variables in Railway:
+   - `OPENAI_API_KEY`
+   - `EXA_API_KEY`
+4. Deploy! Railway will automatically:
+   - Install dependencies from requirements.txt
+   - Start the FastAPI server using uvicorn
+   - Expose the API endpoint
+
+The API will be available at your Railway-provided URL.
+
 ## Flow Diagram
 
 ```mermaid
