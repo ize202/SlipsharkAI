@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from exa_search import process_query
-from auth_service import verify_api_key
+from workflow.exa_search import process_query
+from services.auth_service import verify_api_key
 import os
 from dotenv import load_dotenv
 
