@@ -18,6 +18,7 @@ class NBASeasonBoundary:
     end_month: int = 6    # June
     playoff_start_month: int = 4  # April
     playoff_end_month: int = 6    # June
+    season_change_month: int = 7  # July - when new season year starts
 
 class BasketballDateHandler:
     """Handler for NBA-specific date operations"""
@@ -50,20 +51,11 @@ class BasketballDateHandler:
         Returns:
             Season year as string (e.g., "2023" for 2023-24 season)
         """
-        # Ensure both dates are timezone-aware
+        # Ensure date is timezone-aware
         date = self._ensure_timezone_aware(date)
-        current_date = datetime.now(timezone.utc)
         
-        # If the date is in the future, use the appropriate season
-        if date > current_date:
-            # For future dates between January and June, use previous year
-            if date.month <= 6:
-                return str(date.year - 1)
-            # For future dates between July and December, use current year
-            return str(date.year)
-        
-        # For past/current dates
-        if date.month <= 6:
+        # NBA season changes in July
+        if date.month < self.season_boundary.season_change_month:
             return str(date.year - 1)
         return str(date.year)
     
@@ -82,15 +74,18 @@ class BasketballDateHandler:
         current_date = datetime.now(timezone.utc)
         
         # Allow queries up to next season's end
-        season_year = self.determine_season(current_date)
-        _, season_end = self.get_season_boundaries(season_year)
-        
-        # Don't allow queries more than 1 year in the past
-        min_past_date = current_date.replace(
-            year=current_date.year - 1
+        season_year = int(self.determine_season(current_date))
+        next_season_end = datetime(
+            year=season_year + 2,  # Add 2 since season spans years
+            month=self.season_boundary.end_month,
+            day=30,  # End of June
+            tzinfo=timezone.utc
         )
         
-        return min_past_date <= date <= season_end
+        # Don't allow queries more than 1 year in the past
+        min_past_date = current_date - timedelta(days=365)
+        
+        return min_past_date <= date <= next_season_end
     
     def is_playoff_period(self, date: datetime) -> bool:
         """Check if date falls in typical playoff period"""
@@ -106,20 +101,20 @@ class BasketballDateHandler:
             return "preseason"
         elif self.is_playoff_period(date):
             return "playoffs"
-        elif month == 7 or month == 8 or month == 9:
+        elif self.season_boundary.end_month < month < self.season_boundary.start_month:
             return "offseason"
         else:
             return "regular"
     
     def get_season_boundaries(self, season: str) -> Tuple[datetime, datetime]:
         """
-        Get start and end dates for a season
+        Get the start and end dates for a given season
         
         Args:
-            season: Season year (e.g., "2023" for 2023-24 season)
+            season: Season year as string (e.g. "2023" for 2023-24 season)
             
         Returns:
-            Tuple of (season_start, season_end) dates
+            Tuple of (season_start, season_end) datetimes
         """
         season_year = int(season)
         season_start = datetime(

@@ -341,36 +341,50 @@ class BasketballService:
             if game_date and client_metadata:
                 resolved_date = self._resolve_game_date(game_date, client_metadata)
             
-            # If team name provided, get team ID first
-            team_id = None
+            # Get all teams first
+            teams = await self.teams.list_teams()
+            
+            # If team name provided, filter teams
             if team_name:
-                team_id = NBA_TEAM_IDS.get(team_name.lower())
-                if not team_id:
-                    teams = await self.teams.list_teams()
-                    team = next((t for t in teams if t.name.lower() == team_name.lower()), None)
-                    if team:
-                        team_id = team.id
+                teams = [t for t in teams if t.name.lower() == team_name.lower()]
+                if not teams:
+                    return {"error": f"Team not found: {team_name}"}
             
-            # Search for player
-            players = await self.players.list_players(
-                season=str(current_season),
-                team=team_id,
-                search=player_name
-            )
-            
-            if not players:
-                return {"error": f"Player not found: {player_name}"}
-            
-            # Find exact match or closest match
+            # Search for player across all teams
             player = None
-            for p in players:
-                if p.firstname.lower() + " " + p.lastname.lower() == player_name.lower():
-                    player = p
-                    break
+            player_team = None
+            for team in teams:
+                try:
+                    players = await self.players.get_players(
+                        season=str(current_season),
+                        team=team.id
+                    )
+                    
+                    # Look for exact match first
+                    for p in players:
+                        full_name = f"{p.firstname} {p.lastname}".lower()
+                        if full_name == player_name.lower():
+                            player = p
+                            player_team = team
+                            break
+                    
+                    # If no exact match, try partial match
+                    if not player:
+                        for p in players:
+                            full_name = f"{p.firstname} {p.lastname}".lower()
+                            if player_name.lower() in full_name:
+                                player = p
+                                player_team = team
+                                break
+                    
+                    if player:
+                        break
+                except Exception as e:
+                    logger.warning(f"Error getting players for team {team.name}: {str(e)}")
+                    continue
             
             if not player:
-                # Take first result as closest match
-                player = players[0]
+                return {"error": f"Player not found: {player_name}"}
             
             try:
                 # Get player statistics for current season
@@ -387,34 +401,19 @@ class BasketballService:
                         "is_playoff_period": self.date_handler.is_playoff_period(resolved_date)
                     }
                 
-                # Build response
-                result = {
+                # Format player data
+                player_data = {
                     "id": player.id,
                     "name": f"{player.firstname} {player.lastname}",
-                    "player_info": player.model_dump(),
-                    "season_context": season_context,
-                    "season_stats": {},  # Only keep transformed stats
-                    "statistics": {}  # Raw statistics
+                    "team": {
+                        "id": player_team.id,
+                        "name": player_team.name
+                    },
+                    "season_stats": self._calculate_season_stats(stats) if stats else {},
+                    "season_context": season_context
                 }
                 
-                # Process statistics if available
-                if stats:
-                    # Store raw statistics
-                    result["statistics"] = stats.model_dump()
-                    
-                    # Transform stats for season_stats
-                    result["season_stats"] = {
-                        "games_played": stats.games if hasattr(stats, "games") else 0,
-                        "points_per_game": stats.points if hasattr(stats, "points") else 0,
-                        "rebounds_per_game": stats.totReb if hasattr(stats, "totReb") else 0,
-                        "assists_per_game": stats.assists if hasattr(stats, "assists") else 0,
-                        "field_goal_percentage": stats.fgp if hasattr(stats, "fgp") else "0",
-                        "three_point_percentage": stats.tpp if hasattr(stats, "tpp") else "0",
-                        "free_throw_percentage": stats.ftp if hasattr(stats, "ftp") else "0",
-                        "minutes_per_game": stats.min if hasattr(stats, "min") else "0"
-                    }
-                
-                return result
+                return player_data
                 
             except Exception as e:
                 logger.error(f"Error getting stats for player {player_name}: {str(e)}")
@@ -796,4 +795,19 @@ class BasketballService:
             
         except Exception as e:
             logger.error(f"Error getting league data: {str(e)}")
-            return {} 
+            return {}
+
+    def _calculate_season_stats(self, stats) -> Dict[str, Any]:
+        """Calculate season statistics from raw statistics"""
+        if not stats:
+            return {}
+            
+        return {
+            "games_played": stats.games if hasattr(stats, "games") else 0,
+            "points_per_game": stats.points if hasattr(stats, "points") else 0,
+            "rebounds_per_game": stats.totReb if hasattr(stats, "totReb") else 0,
+            "assists_per_game": stats.assists if hasattr(stats, "assists") else 0,
+            "field_goal_percentage": stats.fgp if hasattr(stats, "fgp") else "0",
+            "three_point_percentage": stats.tpp if hasattr(stats, "tpp") else "0",
+            "free_throw_percentage": stats.ftp if hasattr(stats, "ftp") else "0"
+        } 

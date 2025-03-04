@@ -656,20 +656,43 @@ class NBASeasonService:
     def __init__(self, client: NBAApiClient):
         self.client = client
         self._current_season = None  # Cache current season
+        self._seasons_cache = None   # Cache all seasons
         
     @redis_cache(ttl=86400, prefix="nba_seasons")  # 24 hour cache
     async def list_seasons(self) -> List[int]:
-        """Get list of available seasons"""
-        data = await self.client._make_request("seasons")
-        seasons = sorted(data.get("response", []), reverse=True)  # Sort descending
-        if not seasons:
-            # If API fails, default to known supported seasons
-            seasons = list(range(2015, 2025))  # API supports 2015-2024
-        return seasons
+        """Get list of available seasons with fallback logic"""
+        try:
+            # Try to get from cache first
+            if self._seasons_cache:
+                return self._seasons_cache
+
+            # Try API
+            data = await self.client._make_request("seasons")
+            seasons = data.get("response", [])
+            
+            if seasons:
+                # Sort descending and cache
+                seasons = sorted([int(s) for s in seasons], reverse=True)
+                self._seasons_cache = seasons
+                return seasons
+                
+            # Fallback to calculated seasons if API fails
+            logger.warning("No seasons from API, using calculated fallback")
+            current_year = datetime.now(UTC).year
+            seasons = list(range(current_year - 1, 2015, -1))  # Go back to 2015
+            self._seasons_cache = seasons
+            return seasons
+            
+        except Exception as e:
+            logger.error(f"Error listing seasons: {str(e)}")
+            # Final fallback - return last 3 seasons
+            current_year = datetime.now(UTC).year
+            return list(range(current_year - 1, current_year - 4, -1))
 
     async def get_current_season(self, client_metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
         """
-        Get the current NBA season based on client metadata timestamp or API data.
+        Get the current NBA season based on client metadata timestamp or system date.
+        Implements multiple fallback mechanisms for reliability.
         
         Args:
             client_metadata: Optional client metadata containing timestamp
@@ -680,28 +703,42 @@ class NBASeasonService:
         try:
             # If we have client metadata with timestamp, use that
             if client_metadata and client_metadata.get("timestamp"):
-                timestamp = datetime.fromisoformat(client_metadata["timestamp"].replace("Z", "+00:00"))
-                # NBA seasons span calendar years (e.g. 2023-24 season is "2023")
-                if timestamp.month <= 6:  # Before July is previous year's season
-                    return timestamp.year - 1
-                return timestamp.year
-                
-            # Otherwise use cached season or fetch from API
+                try:
+                    timestamp = datetime.fromisoformat(client_metadata["timestamp"].replace("Z", "+00:00"))
+                    # NBA seasons span calendar years (e.g. 2023-24 season is "2023")
+                    if timestamp.month <= 6:  # Before July is previous year's season
+                        return timestamp.year - 1
+                    return timestamp.year
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error parsing client timestamp: {str(e)}")
+                    # Fall through to next method
+            
+            # Try to get from cache
             if self._current_season is not None:
                 return self._current_season
+            
+            # Try to get from API seasons list
+            try:
+                seasons = await self.list_seasons()
+                if seasons:
+                    self._current_season = seasons[0]  # Most recent season
+                    return self._current_season
+            except Exception as e:
+                logger.warning(f"Error getting seasons from API: {str(e)}")
+            
+            # Final fallback - calculate from current date
+            now = datetime.now(UTC)
+            if now.month <= 6:  # Before July is previous year's season
+                self._current_season = now.year - 1
+            else:
+                self._current_season = now.year
                 
-            seasons = await self.list_seasons()
-            if not seasons:
-                logger.error("No seasons returned from API")
-                return None
-                
-            # Get most recent season (first since we sort descending)
-            self._current_season = seasons[0]
             return self._current_season
             
         except Exception as e:
-            logger.error(f"Error getting current season: {str(e)}")
-            return None
+            logger.error(f"Error determining current season: {str(e)}")
+            # Ultimate fallback - return current year
+            return datetime.now(UTC).year - 1  # Default to previous year's season
 
 class NBALeagueService:
     """Service for NBA league operations"""
@@ -723,16 +760,14 @@ class NBAPlayerService:
     @redis_cache(ttl=86400, prefix="nba_players")  # 24 hour cache for player info
     async def get_players(
         self,
-        season: Optional[str] = None,
+        season: str,  # Make season required
         team: Optional[int] = None,
         name: Optional[str] = None,
         country: Optional[str] = None,
         search: Optional[str] = None
     ) -> List[Player]:
         """Get list of players with optional filters"""
-        params = {}
-        if season:
-            params["season"] = season
+        params = {"season": season}  # Always include season
         if team:
             params["team"] = team
         if name:

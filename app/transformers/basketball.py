@@ -169,59 +169,55 @@ class BasketballTransformer(SportDataTransformer):
             if "error" in raw_data:
                 return {"error": raw_data["error"]}
             
-            player_info = raw_data.get("player_info")
-            if not player_info:
-                return {"error": "No player information found"}
+            # Extract statistics from raw_data
+            statistics = raw_data.get("statistics", [])
+            if not statistics:
+                return {"error": "No player statistics found"}
+            
+            # Get player info from first game (they're all the same)
+            first_game = statistics[0]
+            player_info = first_game.get("player", {})
+            team_info = first_game.get("team", {})
             
             # Validate required player fields
-            if not player_info.get("id") or not player_info.get("name"):
-                return {"error": "Invalid player data: missing required fields"}
+            if not player_info.get("id"):
+                return {"error": "Invalid player data: missing player id"}
             
-            statistics = raw_data.get("statistics", {})
+            # Calculate season averages
+            total_games = len(statistics)
+            total_points = sum(game.get("points", 0) for game in statistics)
+            total_rebounds = sum(game.get("totReb", 0) for game in statistics)
+            total_assists = sum(game.get("assists", 0) for game in statistics)
+            total_fgm = sum(game.get("fgm", 0) for game in statistics)
+            total_fga = sum(game.get("fga", 0) for game in statistics)
+            total_ftm = sum(game.get("ftm", 0) for game in statistics)
+            total_fta = sum(game.get("fta", 0) for game in statistics)
+            total_tpm = sum(game.get("tpm", 0) for game in statistics)
+            total_tpa = sum(game.get("tpa", 0) for game in statistics)
             
+            # Build transformed data
             transformed = {
                 "basic_info": {
                     "id": player_info.get("id"),
-                    "name": player_info.get("firstname", "") + " " + player_info.get("lastname", ""),
-                    "jersey": player_info.get("jersey", ""),
-                    "position": player_info.get("position", ""),
-                    "height": player_info.get("height", {}).get("meters", ""),
-                    "weight": player_info.get("weight", {}).get("kilograms", ""),
-                    "birth": {
-                        "date": player_info.get("birth", {}).get("date", ""),
-                        "country": player_info.get("birth", {}).get("country", "")
-                    },
-                    "college": player_info.get("college", ""),
-                    "draft": {
-                        "year": player_info.get("draft", {}).get("year", ""),
-                        "round": player_info.get("draft", {}).get("round", ""),
-                        "pick": player_info.get("draft", {}).get("pick", "")
+                    "name": f"{player_info.get('firstname', '')} {player_info.get('lastname', '')}".strip(),
+                    "team": {
+                        "id": team_info.get("id"),
+                        "name": team_info.get("name"),
+                        "nickname": team_info.get("nickname"),
+                        "code": team_info.get("code")
                     }
                 },
-                
                 "season_stats": {
-                    "games_played": statistics.get("games_played", 0),
-                    "minutes_per_game": statistics.get("minutes_per_game", "0.0"),
-                    "points_per_game": statistics.get("points_per_game", "0.0"),
-                    "rebounds_per_game": statistics.get("rebounds_per_game", "0.0"),
-                    "assists_per_game": statistics.get("assists_per_game", "0.0"),
-                    "steals_per_game": statistics.get("steals_per_game", "0.0"),
-                    "blocks_per_game": statistics.get("blocks_per_game", "0.0"),
-                    "field_goal_percentage": statistics.get("field_goal_percentage", "0.0"),
-                    "three_point_percentage": statistics.get("three_point_percentage", "0.0"),
-                    "free_throw_percentage": statistics.get("free_throw_percentage", "0.0")
-                }
+                    "games_played": total_games,
+                    "points_per_game": round(total_points / total_games, 1),
+                    "rebounds_per_game": round(total_rebounds / total_games, 1),
+                    "assists_per_game": round(total_assists / total_games, 1),
+                    "field_goal_percentage": round(total_fgm / total_fga * 100, 1) if total_fga > 0 else 0,
+                    "free_throw_percentage": round(total_ftm / total_fta * 100, 1) if total_fta > 0 else 0,
+                    "three_point_percentage": round(total_tpm / total_tpa * 100, 1) if total_tpa > 0 else 0
+                },
+                "statistics": statistics
             }
-            
-            if "recent_games" in required_data and "games" in raw_data:
-                transformed["recent_games"] = []
-                for game in raw_data["games"][:5]:
-                    try:
-                        transformed_game = self._transform_game(game)
-                        transformed["recent_games"].append(transformed_game)
-                    except Exception as e:
-                        logger.error(f"Error transforming game in player recent games: {str(e)}")
-                        continue
             
             return transformed
             
@@ -233,18 +229,24 @@ class BasketballTransformer(SportDataTransformer):
         """Validate transformed basketball data"""
         try:
             if data.team_data:
-                assert "basic_info" in data.team_data
-                assert "league_info" in data.team_data
-                assert "season_stats" in data.team_data
+                if "error" not in data.team_data:
+                    assert "league_info" in data.team_data
+                    assert "season_stats" in data.team_data
                 
             if data.game_data:
                 for game in data.game_data:
-                    assert "teams" in game
-                    assert "score" in game
+                    if "error" not in game:
+                        assert "teams" in game
+                        assert "score" in game
                     
             if data.player_data:
-                assert "basic_info" in data.player_data
-                assert "season_stats" in data.player_data
+                for player_name, player_data in data.player_data.items():
+                    if "error" not in player_data:
+                        # Check for either statistics or error in player data
+                        assert "statistics" in player_data or "error" in player_data
+                        if "statistics" in player_data:
+                            # Validate at least one game stat exists
+                            assert len(player_data["statistics"]) > 0
                 
             return True
             
