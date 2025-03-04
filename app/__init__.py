@@ -1,3 +1,0 @@
-"""
-SlipsharkAI app package
-"""
