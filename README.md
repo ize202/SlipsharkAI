@@ -8,6 +8,7 @@ This MVP demonstrates a basic implementation of a sports research assistant that
 - Process natural language queries about sports
 - Perform real-time web searches for current information
 - Provide accurate, sourced responses about games, scores, stats, and news
+- Access via REST API endpoint
 
 ## Flow Diagram
 
@@ -59,7 +60,7 @@ sequenceDiagram
 
 1. Install dependencies:
 ```bash
-pip install openai exa-py python-dotenv
+pip install openai exa-py python-dotenv fastapi uvicorn
 ```
 
 2. Set up environment variables in `.env`:
@@ -68,9 +69,43 @@ OPENAI_API_KEY=your_openai_key
 EXA_API_KEY=your_exa_key
 ```
 
-3. Run the assistant:
+3. Run the API:
 ```bash
-python exa_search.py "Who won the Lakers game last night?"
+uvicorn main:app --reload
+```
+
+## API Usage
+
+### REST Endpoint
+
+POST `/research`
+
+Request body:
+```json
+{
+    "query": "What NBA games are scheduled for tonight?"
+}
+```
+
+Response:
+```json
+{
+    "answer": "Based on the search results..."
+}
+```
+
+Example using curl:
+```bash
+curl -X POST "http://localhost:8000/research" \
+     -H "Content-Type: application/json" \
+     -d '{"query": "What NBA games are scheduled for tonight?"}'
+```
+
+### Command Line Usage
+
+You can also use the direct script:
+```bash
+python exa_search.py "What NBA games are scheduled for tonight?"
 ```
 
 ## Example Usage
@@ -92,12 +127,13 @@ python exa_search.py "How many points did Jokic score in his last game?"
 - **Search Engine**: Exa Search API
 - **Results Limit**: 5 most relevant results per search
 - **Error Handling**: Basic error catching and reporting
+- **API Framework**: FastAPI
 
 ## Next Steps
 
 Future enhancements could include:
-- FastAPI endpoint for web integration
 - Conversation history support
 - Multiple search tools for different data sources
 - Enhanced error handling and retry logic
 - Response caching for common queries
+- Rate limiting and API key authentication
