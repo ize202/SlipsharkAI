@@ -45,3 +45,6 @@ Thumbs.db
 # API keys
 api_key.txt
 *_api_key.txt
+
+# test files
+chat_cli.py
