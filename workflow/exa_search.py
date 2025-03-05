@@ -60,8 +60,8 @@ def exa_search(query: str):
     return exa.search_and_contents(
         query=query,
         type='auto',
-        highlights=True,
-        num_results=5
+        num_results=10,
+        text = True
     )
 
 def process_tool_calls(tool_calls, messages):
@@ -114,7 +114,7 @@ def process_query(query: str):
             
             # Step 6: Get final response from GPT
             final_completion = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=messages,
             )
             return final_completion.choices[0].message.content
