@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from workflow.exa_search import process_query
 from services.auth_service import verify_api_key
@@ -23,6 +24,15 @@ app = FastAPI(
     title="Sports Research API",
     description="API for real-time sports information using GPT-4 and Exa search",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "https://slipshark.com"],  # Add your frontend URLs
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 #--------------------------------
