@@ -109,7 +109,7 @@ def process_query(query: str):
             # Step 5: Ask GPT to analyze search results and answer the query
             messages.append({
                 "role": "user",
-                "content": "Answer my previous query based on the search results."
+                "content": "Answer my previous query based on the search results. Response must be in markdown format."
             })
             
             # Step 6: Get final response from GPT
