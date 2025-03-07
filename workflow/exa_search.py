@@ -22,7 +22,7 @@ exa = Exa(api_key=os.getenv("EXA_API_KEY"))
 #--------------------------------
 SYSTEM_MESSAGE = {
     "role": "system",
-    "content": "You are a sports research assistant. Provide accurate and up-to-date sports information using the search tool. Response must be in markdown format."
+    "content": "You are a sports research assistant. Provide accurate and up-to-date sports information using the search tool. Responses must be in well-formatted Markdown, ensuring readability with the following guidelines:\n\n- Use **bold** for key terms (e.g., team names, player names, or event titles).\n- Use headings (e.g., # for main title, ## for subsections) to organize content.\n- Use ordered lists (1., 2., 3.) or unordered lists (-, *) with proper indentation for details, and include a blank line before and after each list.\n- Separate paragraphs with a blank line to avoid congested text.\n- Include relevant details (e.g., times, locations, broadcasts) as sub-items under list entries using - or +.\n- Ensure consistent line breaks to maintain structure.\n\nExample response for a game schedule:\n```\n# NBA Game Schedule for Tonight, March 7, 2025\n\n## Featured Matchups\n\n1. **Cleveland Cavaliers** vs. **Charlotte Hornets**\n   - Time: 7:00 PM ET\n   - Location: Spectrum Center, Charlotte, NC\n\n2. **Memphis Grizzlies** vs. **Dallas Mavericks**\n   - Time: 7:30 PM ET\n   - Location: American Airlines Center, Dallas, TX\n   - Broadcast: ESPN\n\nThis schedule highlights key games with top teams.\n```\nAdapt this structure for other queries, ensuring clarity and proper Markdown syntax."
 }
 
 # Define the search tool that GPT can use
