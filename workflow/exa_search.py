@@ -22,7 +22,7 @@ exa = Exa(api_key=os.getenv("EXA_API_KEY"))
 #--------------------------------
 SYSTEM_MESSAGE = {
     "role": "system",
-    "content": "You are a sports research assistant. Provide accurate and up-to-date sports information using the search tool."
+    "content": "You are a sports research assistant. Provide accurate and up-to-date sports information using the search tool. Response must be in markdown format."
 }
 
 # Define the search tool that GPT can use
@@ -109,7 +109,7 @@ def process_query(query: str):
             # Step 5: Ask GPT to analyze search results and answer the query
             messages.append({
                 "role": "user",
-                "content": "Answer my previous query based on the search results. Response must be in markdown format."
+                "content": "Answer my previous query based on the search results"
             })
             
             # Step 6: Get final response from GPT
