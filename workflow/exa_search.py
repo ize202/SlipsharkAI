@@ -81,7 +81,7 @@ def process_tool_calls(tool_calls, messages):
     return messages
 
 def process_query(query: str):
-    """Main query processing pipeline"""
+    """Main query processing pipeline that yields response chunks for streaming"""
     # Step 1: Initialize conversation with system message
     messages = [SYSTEM_MESSAGE]
     
@@ -112,19 +112,32 @@ def process_query(query: str):
                 "content": "Answer my previous query based on the search results"
             })
             
-            # Step 6: Get final response from GPT
+            # Step 6: Get final response from GPT with streaming
             final_completion = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
                 stream=True
             )
-            return final_completion.choices[0].message.content
-        
-        # If no search needed, return direct GPT response
-        return message.content
+            
+            # Yield each chunk for streaming
+            for chunk in final_completion:
+                if chunk.choices[0].delta.content is not None:
+                    yield chunk.choices[0].delta.content
+        else:
+            # If no search needed, return direct GPT response with streaming
+            stream_completion = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                stream=True
+            )
+            
+            # Yield each chunk for streaming
+            for chunk in stream_completion:
+                if chunk.choices[0].delta.content is not None:
+                    yield chunk.choices[0].delta.content
             
     except Exception as e:
-        return f"Error: {str(e)}"
+        yield f"Error: {str(e)}"
 
 #--------------------------------
 # Test Runner
@@ -137,5 +150,10 @@ if __name__ == "__main__":
     
     print(f"\nQuery: {test_query}")
     print("\nProcessing...")
-    response = process_query(test_query)
-    print(f"\nResponse: {response}\n")
+    print("\nResponse: ", end="", flush=True)
+    
+    # Demonstrate streaming by printing chunks as they arrive
+    for chunk in process_query(test_query):
+        print(chunk, end="", flush=True)
+    
+    print("\n")
