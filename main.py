@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from workflow.exa_search import process_query
 from services.auth_service import verify_api_key
@@ -40,6 +41,8 @@ app.add_middleware(
 #--------------------------------
 class ResearchRequest(BaseModel):
     query: str
+    stream: bool = True  # Default to True for streaming
+    maxResults: int | None = None
 
 class ResearchResponse(BaseModel):
     answer: str
@@ -47,18 +50,32 @@ class ResearchResponse(BaseModel):
 #--------------------------------
 # Endpoints
 #--------------------------------
-@app.post("/research", response_model=ResearchResponse)
+@app.post("/research")
 async def research(
     request: ResearchRequest,
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Process a sports-related query and return researched information.
+    Process a sports-related query and stream the researched information.
     Requires valid API key in X-API-Key header.
     """
     try:
-        response = process_query(request.query)
-        return ResearchResponse(answer=response)
+        # Create an async generator for the streaming response
+        async def generate_response():
+            for chunk in process_query(request.query):
+                # Each chunk should be prefixed with 'data: ' and end with two newlines
+                # This follows SSE (Server-Sent Events) protocol
+                yield f"data: {chunk}\n\n"
+
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Transfer-Encoding": "chunked",
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
