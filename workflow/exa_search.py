@@ -60,7 +60,7 @@ def exa_search(query: str):
     return exa.search_and_contents(
         query=query,
         type='auto',
-        num_results=11,
+        num_results=9,
         text = True
     )
 
