@@ -116,6 +116,7 @@ def process_query(query: str):
             final_completion = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
+                stream=True
             )
             return final_completion.choices[0].message.content
         
