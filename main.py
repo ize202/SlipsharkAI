@@ -63,7 +63,7 @@ async def research(
     try:
         # Create an async generator for the streaming response
         async def generate_response():
-            for chunk in process_query(request.query):
+            for chunk in process_query(request.query, platform=request.platform):
                 # Each chunk should be prefixed with 'data: ' and end with two newlines
                 # This follows SSE (Server-Sent Events) protocol
                 yield f"data: {chunk}\n\n"
