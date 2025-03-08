@@ -298,18 +298,17 @@ def process_tool_calls(tool_calls, messages):
 
 def get_system_context(platform: str = "mobile"):
     """Get system context including platform information"""
-    system = platform.system()
-    return f"System context - OS: {system}, Platform: {platform}\n"
+    return f"Platform: {platform}\n"
 
 def process_query(query: str, platform: str = "mobile"):
     """Main query processing pipeline that yields response chunks for streaming"""
     # Initialize conversation with system message
     messages = [SYSTEM_MESSAGE]
     
-    # Add time and system context with platform
+    # Add time and platform context
     time_context = get_time_context()
-    system_context = get_system_context(platform)
-    context = f"{time_context}{system_context}"
+    platform_context = get_system_context(platform)
+    context = f"{time_context}{platform_context}"
     
     messages.append({"role": "user", "content": f"{context}{query}"})
     
