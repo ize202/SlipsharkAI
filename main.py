@@ -43,6 +43,7 @@ class ResearchRequest(BaseModel):
     query: str
     stream: bool = True  # Default to True for streaming
     maxResults: int | None = None
+    platform: str = "mobile"  # Default to mobile if not specified
 
 class ResearchResponse(BaseModel):
     answer: str

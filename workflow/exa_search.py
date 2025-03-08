@@ -86,7 +86,7 @@ SYSTEM_MESSAGE = {
    - Keep table data concise with abbreviated stats when appropriate
 
 4. Content length guidelines:
-   - Limit responses to approximately 80-100 words total on mobile platforms and 250 words in web platforms
+   - Limit responses to approximately 80-100 words total on mobile platforms and 150-200 words in web platforms
    - Break long content into clearly defined sections with appropriate headings
    - For extensive data, focus on the most relevant subset rather than exhaustive listings
    - For historical or detailed analyses, present the most important 3-5 points rather than comprehensive coverage
@@ -296,14 +296,22 @@ def process_tool_calls(tool_calls, messages):
     
     return messages
 
-def process_query(query: str):
+def get_system_context(platform: str = "mobile"):
+    """Get system context including platform information"""
+    system = platform.system()
+    return f"System context - OS: {system}, Platform: {platform}\n"
+
+def process_query(query: str, platform: str = "mobile"):
     """Main query processing pipeline that yields response chunks for streaming"""
-    # Step 1: Initialize conversation with system message
+    # Initialize conversation with system message
     messages = [SYSTEM_MESSAGE]
     
-    # Step 2: Add time context and user query
+    # Add time and system context with platform
     time_context = get_time_context()
-    messages.append({"role": "user", "content": f"{time_context}{query}"})
+    system_context = get_system_context(platform)
+    context = f"{time_context}{system_context}"
+    
+    messages.append({"role": "user", "content": f"{context}{query}"})
     
     try:
         # Step 3: Ask GPT to analyze query and decide on search strategy
