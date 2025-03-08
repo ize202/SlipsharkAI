@@ -276,7 +276,7 @@ def exa_search(query: str):
     return exa.search_and_contents(
         query=query,
         type='auto',
-        num_results=9,
+        num_results=10,
         text = True
     )
 
@@ -337,7 +337,7 @@ def process_query(query: str, platform: str = "mobile"):
             
             # Step 6: Get final response from GPT with streaming
             final_completion = openai.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=messages,
                 stream=True
             )
@@ -349,7 +349,7 @@ def process_query(query: str, platform: str = "mobile"):
         else:
             # If no search needed, return direct GPT response with streaming
             stream_completion = openai.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=messages,
                 stream=True
             )
