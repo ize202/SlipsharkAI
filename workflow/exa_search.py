@@ -101,7 +101,6 @@ SYSTEM_MESSAGE = {
    - Break long content into clearly defined sections with appropriate headings
    - For extensive data, focus on the most relevant subset rather than exhaustive listings
    - For historical or detailed analyses, present the most important 3-5 points rather than comprehensive coverage
-   - When presenting multiple games/matches, limit to 5-7 per response unless specifically requested
 
 ## Common Response Patterns
 
