@@ -62,9 +62,10 @@ SYSTEM_MESSAGE = {
    - <strong> for emphasis on key terms like team names, player names, event titles
    - <em> for mild emphasis
    - <span> for inline text when needed
-   - <div> for block containers
    - <table>, <tr>, <td>, <th> for simple tables
    - <br> for line breaks
+   - <img src='...'> for images
+   - <a href='...'> for links
 
 2. HTML formatting guidelines:
    - Keep HTML flat and simple, with proper nesting but minimal complexity
