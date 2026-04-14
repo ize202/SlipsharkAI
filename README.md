@@ -1,155 +1,57 @@
-# Sports Research Assistant MVP
+# SlipsharkAI
 
-A simple sports research chatbot that uses OpenAI's GPT-4 and Exa's web search capabilities to provide up-to-date sports information.
+SlipsharkAI is a FastAPI backend for a sports research assistant. It accepts a sports question, decides when to search the web with Exa, and streams back a source-linked answer.
 
-## Overview
+## What it is
 
-This MVP demonstrates a basic implementation of a sports research assistant that can:
-- Process natural language queries about sports
-- Perform real-time web searches for current information
-- Provide accurate, sourced responses about games, scores, stats, and news
-- Access via REST API endpoint
+This repo is the API layer behind a sports assistant prototype. It exposes a `/research` endpoint for streamed answers plus a simple root health check.
 
-## Deployment
+## What problem it solves
 
-### Railway Deployment
+The goal was to answer sports questions with fresher information than a model-only chat response. The API adds search, basic access control, and streaming so a frontend can show answers as they are generated.
 
-1. Push your code to a GitHub repository
-2. Connect your repository to Railway
-3. Add environment variables in Railway:
-   - `OPENAI_API_KEY`
-   - `EXA_API_KEY`
-4. Deploy! Railway will automatically:
-   - Install dependencies from requirements.txt
-   - Start the FastAPI server using uvicorn
-   - Expose the API endpoint
+## What I built
 
-The API will be available at your Railway-provided URL.
+- A FastAPI service that streams responses over server-sent events
+- `X-API-Key` request validation for the main research endpoint
+- An Exa-powered search workflow that pulls in current sources when the model needs them
+- HTML-safe response formatting tuned for mobile and web clients
+- Railway deployment files plus a local dotenv-based setup
 
-## Flow Diagram
+## Stack
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant System
-    participant GPT4
-    participant ExaSearch
-    
-    User->>System: Sports Query
-    System->>GPT4: Initialize with System Message
-    GPT4-->>GPT4: Analyze Query
-    
-    alt Search Needed
-        GPT4->>ExaSearch: Request Web Search
-        ExaSearch-->>GPT4: Return Search Results
-        GPT4-->>GPT4: Analyze Results
-        GPT4->>System: Generate Final Response
-    else No Search Needed
-        GPT4->>System: Direct Response
-    end
-    
-    System->>User: Return Answer
-```
+- Python
+- FastAPI
+- OpenAI
+- Exa
+- Railway
 
-## How It Works
+## Screenshots or demo
 
-1. **Query Input**
-   - User submits a sports-related question
-   - System initializes conversation with sports assistant context
-
-2. **Query Analysis**
-   - GPT-4 analyzes the query
-   - Determines if web search is needed
-   - Formulates search strategy if required
-
-3. **Web Search (if needed)**
-   - Executes targeted web search via Exa API
-   - Retrieves relevant sports information
-   - Limited to top 5 most relevant results
-
-4. **Response Generation**
-   - GPT-4 processes search results
-   - Synthesizes information into coherent answer
-   - Returns formatted response to user
-
-## Quick Start
-
-1. Install dependencies:
-```bash
-pip install openai exa-py python-dotenv fastapi uvicorn
-```
-
-2. Set up environment variables in `.env`:
-```
-OPENAI_API_KEY=your_openai_key
-EXA_API_KEY=your_exa_key
-```
-
-3. Run the API:
-```bash
-uvicorn main:app --reload
-```
-
-## API Usage
-
-### REST Endpoint
-
-POST `/research`
-
-Request body:
-```json
-{
-    "query": "What NBA games are scheduled for tonight?"
-}
-```
-
-Response:
-```json
-{
-    "answer": "Based on the search results..."
-}
-```
-
-Example using curl:
 ```bash
 curl -X POST "http://localhost:8000/research" \
-     -H "Content-Type: application/json" \
-     -d '{"query": "What NBA games are scheduled for tonight?"}'
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk_v1_your_generated_key" \
+  -d '{"query":"What NBA games are on tonight?","platform":"mobile"}'
 ```
 
-### Command Line Usage
+The endpoint streams chunks back as server-sent events.
 
-You can also use the direct script:
-```bash
-python exa_search.py "What NBA games are scheduled for tonight?"
+## Local setup
+
+1. Create a virtual environment.
+2. Install dependencies with `pip install -r requirements.txt`.
+3. Add these values to `.env`:
+
+```env
+OPENAI_API_KEY=...
+EXA_API_KEY=...
+API_KEY=sk_v1_generated_key
 ```
 
-## Example Usage
+4. If you need a valid app key, run `python generate_key.py`.
+5. Start the API with `uvicorn main:app --reload`.
 
-```bash
-# Basic query
-python exa_search.py "What NBA games are scheduled for tonight?"
+## Current status
 
-# Specific team query
-python exa_search.py "What is the Warriors' current record?"
-
-# Player stats query
-python exa_search.py "How many points did Jokic score in his last game?"
-```
-
-## Technical Details
-
-- **Model**: GPT-4
-- **Search Engine**: Exa Search API
-- **Results Limit**: 5 most relevant results per search
-- **Error Handling**: Basic error catching and reporting
-- **API Framework**: FastAPI
-
-## Next Steps
-
-Future enhancements could include:
-- Conversation history support
-- Multiple search tools for different data sources
-- Enhanced error handling and retry logic
-- Response caching for common queries
-- Rate limiting and API key authentication
+MVP backend for a sports assistant. The main gap today is product hardening, not the core search-and-stream flow.
