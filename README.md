@@ -1,6 +1,6 @@
 # SlipsharkAI
 
-SlipsharkAI is a FastAPI backend for a sports research assistant. It accepts a sports question, decides when to search the web with Exa, and streams back a source-linked answer.
+SlipsharkAI is a FastAPI backend for a sports research assistant. It takes a sports question, decides when to search the web with Exa, and streams back an answer with sources.
 
 ## What it is
 
@@ -8,15 +8,15 @@ This repo is the API layer behind a sports assistant prototype. It exposes a `/r
 
 ## What problem it solves
 
-The goal was to answer sports questions with fresher information than a model-only chat response. The API adds search, basic access control, and streaming so a frontend can show answers as they are generated.
+The goal was to answer sports questions with current information instead of relying on the model alone. The API adds search, basic access control, and streaming so a frontend can show answers as they come in.
 
 ## What I built
 
 - A FastAPI service that streams responses over server-sent events
 - `X-API-Key` request validation for the main research endpoint
-- An Exa-powered search workflow that pulls in current sources when the model needs them
-- HTML-safe response formatting tuned for mobile and web clients
-- Railway deployment files plus a local dotenv-based setup
+- An Exa-powered search flow that pulls in current sources when the model needs them
+- HTML-safe response formatting for mobile and web clients
+- Railway deployment files and a local dotenv setup
 
 ## Stack
 
@@ -54,4 +54,4 @@ API_KEY=sk_v1_generated_key
 
 ## Current status
 
-MVP backend for a sports assistant. The main gap today is product hardening, not the core search-and-stream flow.
+MVP backend for a sports assistant. The core flow works. What is left is product polish and better deployment setup.
