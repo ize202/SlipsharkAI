@@ -51,10 +51,12 @@ fi
 
 run_id="$(uv run python -c 'import secrets; print(secrets.token_hex(12))')"
 network_name="slipshark-verify-$run_id"
+published_network_name="slipshark-verify-published-$run_id"
 redis_name="slipshark-verify-redis-$run_id"
 app_name="slipshark-verify-app-$run_id"
 image_name="slipshark:verify"
 network_created=0
+published_network_created=0
 redis_created=0
 app_created=0
 
@@ -72,6 +74,9 @@ cleanup() {
   fi
   if (( network_created == 1 )); then
     docker network rm "$network_name" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if (( published_network_created == 1 )); then
+    docker network rm "$published_network_name" >/dev/null 2>&1 || cleanup_failed=1
   fi
 
   if (( original_status == 0 && cleanup_failed == 1 )); then
@@ -101,8 +106,12 @@ if grep -Eq 'SLIPSHARK_(OPENAI_API_KEY|EXA_API_KEY|API_KEYS|REDIS_URL)=' \
   exit 1
 fi
 
+# Keep Redis on the internal network; the second run-scoped bridge exists only
+# so Docker can allocate the app's loopback-only health-check port.
 docker network create --internal "$network_name" >/dev/null
 network_created=1
+docker network create "$published_network_name" >/dev/null
+published_network_created=1
 
 docker container create \
   --name "$redis_name" \
@@ -138,12 +147,24 @@ docker container create \
   --env SLIPSHARK_REDIS_RATE_LIMIT_TIMEOUT_SECONDS=1 \
   "$image_name" >/dev/null
 app_created=1
+docker network connect "$published_network_name" "$app_name"
 docker container start "$app_name" >/dev/null
+
+if [[ "$(docker container inspect "$app_name" --format '{{.State.Running}}')" != "true" ]]; then
+  echo "Slipshark container exited during startup" >&2
+  docker container logs "$app_name" >&2
+  exit 1
+fi
 
 binding_count="$(
   docker container inspect "$app_name" \
     --format '{{len (index .NetworkSettings.Ports "8000/tcp")}}'
 )"
+if [[ "$binding_count" != "1" ]]; then
+  echo "Expected one loopback-only app binding, got count=$binding_count" >&2
+  docker container logs "$app_name" >&2
+  exit 1
+fi
 host_ip="$(
   docker container inspect "$app_name" \
     --format '{{(index (index .NetworkSettings.Ports "8000/tcp") 0).HostIp}}'
@@ -152,7 +173,7 @@ host_port="$(
   docker container inspect "$app_name" \
     --format '{{(index (index .NetworkSettings.Ports "8000/tcp") 0).HostPort}}'
 )"
-if [[ "$binding_count" != "1" || "$host_ip" != "127.0.0.1" || ! "$host_port" =~ ^[0-9]+$ ]]; then
+if [[ "$host_ip" != "127.0.0.1" || ! "$host_port" =~ ^[0-9]+$ ]]; then
   echo "Expected one loopback-only app binding, got count=$binding_count host=$host_ip port=$host_port" >&2
   exit 1
 fi

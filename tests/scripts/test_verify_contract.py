@@ -75,11 +75,14 @@ def test_full_mode_is_isolated_bounded_and_ownership_aware() -> None:
     assert "redis:8.8.0-alpine" in script
     assert "redis:latest" not in script
     assert "docker network create --internal" in script
+    assert 'docker network create "$published_network_name"' in script
+    assert 'docker network connect "$published_network_name" "$app_name"' in script
     assert "--publish 127.0.0.1::8000/tcp" in script
     assert "redis_port_bindings" in script
     assert "for _attempt in {1..30}" in script
     assert "--connect-timeout 1 --max-time 2" in script
     assert "network_created=0" in script
+    assert "published_network_created=0" in script
     assert "redis_created=0" in script
     assert "app_created=0" in script
     assert "trap cleanup EXIT" in script
@@ -89,6 +92,7 @@ def test_full_mode_is_isolated_bounded_and_ownership_aware() -> None:
     assert 'docker container rm --force "$app_name"' in script
     assert 'docker container rm --force "$redis_name"' in script
     assert 'docker network rm "$network_name"' in script
+    assert 'docker network rm "$published_network_name"' in script
     assert '"$base_url/health/live"' in script
     assert '"$base_url/health/ready"' in script
     assert '"$base_url/research"' not in script
