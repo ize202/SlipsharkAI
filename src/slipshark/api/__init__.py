@@ -1,0 +1,1 @@
+"""HTTP-facing Slipshark contracts."""

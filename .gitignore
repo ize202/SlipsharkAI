@@ -1,5 +1,7 @@
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -25,8 +27,18 @@ wheels/
 *.egg
 
 # Virtual Environment
+.venv/
 venv/
 ENV/
+
+# Test and analysis output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # Conda
 .conda/
