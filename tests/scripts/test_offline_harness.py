@@ -65,7 +65,7 @@ def test_demo_script_prints_one_complete_valid_transcript() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
-    assert result.stdout.startswith("LOCAL SIMULATION —")
+    assert result.stdout.startswith("LOCAL SIMULATION:")
     transcript_start = result.stdout.index("event: ")
     events = smoke.validate_sse_transcript(result.stdout[transcript_start:].encode())
     smoke.validate_expected_research(events)

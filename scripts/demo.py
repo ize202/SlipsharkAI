@@ -9,7 +9,7 @@ if not __package__:
 
 from scripts.smoke import FIXED_QUERY, collect_research_transcript  # noqa: E402
 
-_LABEL = "LOCAL SIMULATION — deterministic fixtures; no network or provider calls"
+_LABEL = "LOCAL SIMULATION: deterministic fixtures; no network or provider calls"
 
 
 async def run_demo() -> None:
