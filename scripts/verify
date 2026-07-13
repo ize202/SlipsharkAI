@@ -10,9 +10,18 @@ if [[ "$(pwd -P)" != "$repo_root" ]]; then
   exit 2
 fi
 
-if (( $# != 0 )); then
-  echo "Usage: ./scripts/verify" >&2
+full_mode=0
+if (( $# > 1 )); then
+  echo "Usage: ./scripts/verify [--full]" >&2
   exit 2
+fi
+
+if (( $# == 1 )); then
+  if [[ "$1" != "--full" ]]; then
+    echo "Usage: ./scripts/verify [--full]" >&2
+    exit 2
+  fi
+  full_mode=1
 fi
 
 uv lock --check
@@ -23,3 +32,186 @@ uv run mypy src/slipshark
 uv run pytest -q
 uv run python scripts/smoke.py
 uv run python scripts/demo.py
+
+if (( full_mode == 0 )); then
+  exit 0
+fi
+
+for required_command in docker curl; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Full verification requires $required_command" >&2
+    exit 1
+  fi
+done
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Full verification requires a running Docker daemon" >&2
+  exit 1
+fi
+
+run_id="$(uv run python -c 'import secrets; print(secrets.token_hex(12))')"
+network_name="slipshark-verify-$run_id"
+redis_name="slipshark-verify-redis-$run_id"
+app_name="slipshark-verify-app-$run_id"
+image_name="slipshark:verify"
+network_created=0
+redis_created=0
+app_created=0
+
+cleanup() {
+  original_status=$?
+  cleanup_failed=0
+  trap - EXIT HUP INT TERM
+  set +e
+
+  if (( app_created == 1 )); then
+    docker container rm --force "$app_name" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if (( redis_created == 1 )); then
+    docker container rm --force "$redis_name" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if (( network_created == 1 )); then
+    docker network rm "$network_name" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+
+  if (( original_status == 0 && cleanup_failed == 1 )); then
+    echo "Full verification passed, but Docker cleanup failed" >&2
+    original_status=1
+  fi
+  exit "$original_status"
+}
+
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+docker build --tag "$image_name" .
+
+image_user="$(docker image inspect "$image_name" --format '{{.Config.User}}')"
+if [[ "$image_user" != "slipshark" ]]; then
+  echo "Expected image user slipshark, got ${image_user:-<empty>}" >&2
+  exit 1
+fi
+
+image_environment="$(docker image inspect "$image_name" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+if grep -Eq 'SLIPSHARK_(OPENAI_API_KEY|EXA_API_KEY|API_KEYS|REDIS_URL)=' \
+  <<<"$image_environment"; then
+  echo "The image configuration contains a secret environment field" >&2
+  exit 1
+fi
+
+docker network create --internal "$network_name" >/dev/null
+network_created=1
+
+docker container create \
+  --name "$redis_name" \
+  --network "$network_name" \
+  --read-only \
+  --tmpfs /data:rw,nosuid,nodev,noexec,size=64m \
+  redis:8.8.0-alpine \
+  redis-server --save "" --appendonly no >/dev/null
+redis_created=1
+docker container start "$redis_name" >/dev/null
+
+redis_port_bindings="$(docker container inspect "$redis_name" --format '{{json .HostConfig.PortBindings}}')"
+if [[ "$redis_port_bindings" != "{}" ]]; then
+  echo "Redis must not publish a host port: $redis_port_bindings" >&2
+  exit 1
+fi
+
+docker container create \
+  --name "$app_name" \
+  --network "$network_name" \
+  --publish 127.0.0.1::8000/tcp \
+  --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --env SLIPSHARK_ENVIRONMENT=production \
+  --env SLIPSHARK_HOST=0.0.0.0 \
+  --env SLIPSHARK_PORT=8000 \
+  --env SLIPSHARK_OPENAI_API_KEY=container-verifier-openai-placeholder \
+  --env SLIPSHARK_EXA_API_KEY=container-verifier-exa-placeholder \
+  --env 'SLIPSHARK_API_KEYS={"verify-client":"container-verifier-key-0000000000000000"}' \
+  --env "SLIPSHARK_REDIS_URL=redis://$redis_name:6379/0" \
+  --env SLIPSHARK_REDIS_RATE_LIMIT_TIMEOUT_SECONDS=1 \
+  "$image_name" >/dev/null
+app_created=1
+docker container start "$app_name" >/dev/null
+
+binding_count="$(
+  docker container inspect "$app_name" \
+    --format '{{len (index .NetworkSettings.Ports "8000/tcp")}}'
+)"
+host_ip="$(
+  docker container inspect "$app_name" \
+    --format '{{(index (index .NetworkSettings.Ports "8000/tcp") 0).HostIp}}'
+)"
+host_port="$(
+  docker container inspect "$app_name" \
+    --format '{{(index (index .NetworkSettings.Ports "8000/tcp") 0).HostPort}}'
+)"
+if [[ "$binding_count" != "1" || "$host_ip" != "127.0.0.1" || ! "$host_port" =~ ^[0-9]+$ ]]; then
+  echo "Expected one loopback-only app binding, got count=$binding_count host=$host_ip port=$host_port" >&2
+  exit 1
+fi
+
+base_url="http://127.0.0.1:$host_port"
+expected_ready='{"status":"ready","configuration":"ready","redis":"ready"}'
+ready_body=""
+for _attempt in {1..30}; do
+  if [[ "$(docker container inspect "$app_name" --format '{{.State.Running}}')" != "true" ]]; then
+    echo "Slipshark container exited before becoming ready" >&2
+    docker container logs "$app_name" >&2
+    exit 1
+  fi
+  if ready_body="$(
+    curl --silent --show-error --fail --connect-timeout 1 --max-time 2 \
+      "$base_url/health/ready" 2>/dev/null
+  )" && [[ "$ready_body" == "$expected_ready" ]]; then
+    break
+  fi
+  ready_body=""
+  sleep 1
+done
+
+if [[ "$ready_body" != "$expected_ready" ]]; then
+  echo "Slipshark container did not become ready before the deadline" >&2
+  docker container logs "$app_name" >&2
+  exit 1
+fi
+
+live_body="$(
+  curl --silent --show-error --fail --connect-timeout 1 --max-time 2 \
+    "$base_url/health/live"
+)"
+if [[ "$live_body" != '{"status":"ok"}' ]]; then
+  echo "Unexpected liveness response: $live_body" >&2
+  exit 1
+fi
+
+runtime_uid="$(docker container exec "$app_name" id -u)"
+if [[ ! "$runtime_uid" =~ ^[0-9]+$ || "$runtime_uid" == "0" ]]; then
+  echo "Expected a non-root runtime UID, got $runtime_uid" >&2
+  exit 1
+fi
+
+docker container exec "$app_name" sh -c \
+  'test ! -w /app && test ! -w /app/src/slipshark && test ! -e /app/tests && test ! -e /app/scripts && test ! -e /app/.git && test ! -e /app/.env && test -z "$(find /app \( -type d -name __pycache__ -o -type f \( -name "*.pyc" -o -name "*.pyo" \) \) -print -quit)" && ! command -v pytest >/dev/null 2>&1 && ! command -v ruff >/dev/null 2>&1 && ! command -v mypy >/dev/null 2>&1'
+
+docker container stop --timeout 5 "$redis_name" >/dev/null
+live_status="$(
+  curl --silent --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 1 --max-time 2 "$base_url/health/live"
+)"
+ready_status="$(
+  curl --silent --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 1 --max-time 3 "$base_url/health/ready"
+)"
+if [[ "$live_status" != "200" || "$ready_status" != "503" ]]; then
+  echo "Expected Redis loss to preserve liveness and fail readiness; got live=$live_status ready=$ready_status" >&2
+  exit 1
+fi
+
+echo "Slipshark full container verification passed"
