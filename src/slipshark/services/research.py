@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, TypeVar, runtime_checkable
@@ -84,7 +84,7 @@ class ResearchService:
         self,
         query: ResearchQuery,
         request_id: UUID,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         loop = asyncio.get_running_loop()
         request_deadline = loop.time() + self._limits.request_timeout_seconds
         now = self._clock()

@@ -143,6 +143,44 @@ async def test_redis_unavailability_fails_closed_with_private_typed_error() -> N
     assert "private redis address" not in str(caught.value)
 
 
+class _ProbeRedis(_FakeRedis):
+    def __init__(
+        self,
+        *,
+        ready: bool = True,
+        error: Exception | None = None,
+    ) -> None:
+        super().__init__()
+        self.ready_value = ready
+        self.probe_error = error
+        self.ping_calls = 0
+
+    async def ping(self) -> bool:
+        self.ping_calls += 1
+        if self.probe_error is not None:
+            raise self.probe_error
+        return self.ready_value
+
+
+@pytest.mark.asyncio
+async def test_redis_readiness_uses_a_bounded_non_mutating_ping() -> None:
+    redis = _ProbeRedis(ready=True)
+    limiter = RedisRateLimiter(redis)
+
+    assert await limiter.ready() is True
+    assert redis.ping_calls == 1
+    assert redis.calls == []
+
+
+@pytest.mark.asyncio
+async def test_redis_readiness_returns_false_when_ping_is_unavailable() -> None:
+    redis = _ProbeRedis(error=RedisConnectionError("private redis address"))
+    limiter = RedisRateLimiter(redis)
+
+    assert await limiter.ready() is False
+    assert redis.ping_calls == 1
+
+
 @pytest.mark.parametrize(
     "result",
     [

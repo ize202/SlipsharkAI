@@ -4,11 +4,12 @@ import asyncio
 import math
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 from redis.exceptions import RedisError
+from redis.typing import EncodableT, KeyT
 
 _SUBJECT_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 
@@ -43,6 +44,8 @@ class RateLimitDecision:
 
 
 class RateLimiter(Protocol):
+    async def ready(self) -> bool: ...
+
     async def consume(
         self,
         subject: str,
@@ -66,6 +69,9 @@ class InMemoryRateLimiter:
         self._clock = clock
         self._windows: dict[str, _Window] = {}
         self._lock = asyncio.Lock()
+
+    async def ready(self) -> bool:
+        return True
 
     async def consume(
         self,
@@ -104,7 +110,14 @@ class InMemoryRateLimiter:
 
 
 class _RedisEvalClient(Protocol):
-    async def eval(self, script: str, numkeys: int, *args: object) -> object: ...
+    def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[object]: ...
+
+    def ping(self) -> Awaitable[bool]: ...
 
 
 class RedisRateLimiter:
@@ -123,6 +136,13 @@ class RedisRateLimiter:
         self._redis = redis
         self._key_prefix = normalized_prefix
         self._operation_timeout_seconds = operation_timeout_seconds
+
+    async def ready(self) -> bool:
+        try:
+            async with asyncio.timeout(self._operation_timeout_seconds):
+                return await self._redis.ping()
+        except (RedisError, TimeoutError):
+            return False
 
     async def consume(
         self,

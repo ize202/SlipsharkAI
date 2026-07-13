@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from slipshark.config import Environment, Settings
@@ -21,14 +21,18 @@ API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 class APIKeyDependency:
-    def __init__(self, authenticator: APIKeyAuthenticator) -> None:
+    def __init__(self, authenticator: APIKeyAuthenticator | None = None) -> None:
         self._authenticator = authenticator
 
     def __call__(
         self,
+        request: Request,
         candidate: Annotated[str | None, Security(API_KEY_HEADER)],
     ) -> str:
-        return authenticate_api_key(candidate, authenticator=self._authenticator)
+        authenticator = self._authenticator
+        if authenticator is None:
+            authenticator = get_runtime_services(request).authenticator
+        return authenticate_api_key(candidate, authenticator=authenticator)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +41,13 @@ class RuntimeServices:
     authenticator: APIKeyAuthenticator
     research_service: ResearchService
     rate_limiter: RateLimiter
+
+
+def get_runtime_services(request: Request) -> RuntimeServices:
+    runtime = getattr(request.app.state, "runtime_services", None)
+    if not isinstance(runtime, RuntimeServices):
+        raise RuntimeError("application runtime is unavailable")
+    return runtime
 
 
 def build_runtime_services(

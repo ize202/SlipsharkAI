@@ -4,9 +4,10 @@ import re
 from collections.abc import Mapping
 from enum import StrEnum
 from types import MappingProxyType
+from typing import Annotated
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PRINCIPAL_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}")
@@ -33,14 +34,19 @@ class Settings(BaseSettings):
     exa_api_key: SecretStr | None = None
     api_keys: Mapping[str, SecretStr] = Field(default_factory=dict)
     redis_url: SecretStr | None = None
+    host: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+    ] = "127.0.0.1"
+    port: int = Field(default=8000, ge=1, le=65_535)
 
-    max_query_chars: int = Field(default=1_000, ge=1, le=10_000)
+    max_query_chars: int = Field(default=1_000, ge=1, le=1_000)
     max_results: int = Field(default=10, ge=1, le=10)
     planner_timeout_seconds: float = Field(default=10, gt=0, le=60)
     search_timeout_seconds: float = Field(default=10, gt=0, le=60)
     answer_timeout_seconds: float = Field(default=30, gt=0, le=120)
     request_timeout_seconds: float = Field(default=45, gt=0, le=180)
-    per_source_char_limit: int = Field(default=4_000, ge=1, le=16_000)
+    per_source_char_limit: int = Field(default=4_000, ge=1, le=4_000)
     total_source_char_limit: int = Field(default=16_000, ge=1, le=64_000)
     answer_char_limit: int = Field(default=12_000, ge=1, le=48_000)
     exa_connect_timeout_seconds: float = Field(default=3, gt=0, le=30)
@@ -134,3 +140,9 @@ class Settings(BaseSettings):
         if not value.isascii():
             raise ValueError(f"{field_name} must contain only ASCII characters")
         return value
+
+
+def load_settings() -> Settings:
+    # BaseSettings supplies required fields from the environment at runtime;
+    # mypy cannot model that alternate construction path.
+    return Settings()  # type: ignore[call-arg]
